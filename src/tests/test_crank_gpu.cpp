@@ -133,3 +133,16 @@ TEST_CASE (
 }
 
 #endif
+
+TEST_CASE (
+
+"gpu provider selection prefers Metal before Vulkan"
+,
+"[crank][gpu][v2][selection]"
+)
+ {
+    CHECK(gpu_backend::select_provider(true, true) == gpu_provider::metal);
+    CHECK(gpu_backend::select_provider(true, false) == gpu_provider::metal);
+    CHECK(gpu_backend::select_provider(false, true) == gpu_provider::vulkan);
+    CHECK(gpu_backend::select_provider(false, false) == gpu_provider::none);
+}

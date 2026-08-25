@@ -24,6 +24,7 @@
 
 #include "lithe/backends/lithe_codegen_vulkan_spirv_ir.hpp"
 #include "lithe/backends/lithe_codegen_metal.hpp"
+#include "lithe/backends/lithe_codegen_backend_registry.hpp"
 #include "lithe/lithe_codegen_device.hpp"
 
 #if __has_include(<vulkan/vulkan.h>) && (defined(HAS_MOLTENVK) || defined(HAS_VULKAN))
@@ -265,6 +266,9 @@ namespace crank {
         [[nodiscard]] bool ok() const noexcept { return status == gpu_dispatch_status::ok; }
     };
 
+    // Crank consumes Lithe's shared provider-selection policy.
+    using gpu_provider = lithe::codegen::backends::device_provider;
+
     // ============================================================================
     // gpu_backend — capability probe + elementwise SPIR-V compile/install/dispatch.
     //
@@ -286,8 +290,19 @@ namespace crank {
 #endif
         }
 
+        [[nodiscard]] static constexpr gpu_provider
+        select_provider(const bool metal_is_available,
+                        const bool vulkan_is_available) noexcept {
+            return lithe::codegen::backends::select_device_provider(
+                metal_is_available, vulkan_is_available);
+        }
+
+        [[nodiscard]] static gpu_provider preferred_provider() noexcept {
+            return select_provider(metal_available(), vulkan_available());
+        }
+
         [[nodiscard]] static bool available() noexcept {
-            return metal_available() || vulkan_available();
+            return preferred_provider() != gpu_provider::none;
         }
 
         [[nodiscard]] static bool supports(const lithe::codegen::device::kernel_plan& plan) noexcept {
@@ -326,7 +341,7 @@ namespace crank {
                 return {gpu_dispatch_status::unsupported_shape,
                         "gpu: HL-MIR region is outside the shared f32 binary contract"};
             }
-            if (metal_available()) {
+            if (preferred_provider() == gpu_provider::metal) {
                 auto artifact = compile_metal(plan);
                 if (!artifact.ok()) {
                     return {gpu_dispatch_status::no_device,
@@ -336,6 +351,10 @@ namespace crank {
                 return {gpu_dispatch_status::ok, "gpu: native Metal pipeline installed"};
             }
 #if defined(LITHE_VULKAN_BACKEND_AVAILABLE) && LITHE_VULKAN_BACKEND_AVAILABLE
+            if (preferred_provider() != gpu_provider::vulkan) {
+                return {gpu_dispatch_status::no_device,
+                        "gpu: neither Metal nor Vulkan/MoltenVK is available"};
+            }
             namespace vk_be = lithe::codegen::backends;
             namespace ex = lithe::execution;
             auto module = compile_elementwise(plan, op);

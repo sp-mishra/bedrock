@@ -10793,3 +10793,18 @@ TEST_CASE (
     REQUIRE(backend.return_value.has_value());
     REQUIRE(*backend.return_value == 0);
 }
+
+TEST_CASE (
+
+"Device provider selection prefers Metal before Vulkan"
+,
+"[lithe][codegen][device][selection]"
+)
+ {
+    using namespace lithe::codegen::backends;
+
+    CHECK(select_device_provider(true, true) == device_provider::metal);
+    CHECK(select_device_provider(true, false) == device_provider::metal);
+    CHECK(select_device_provider(false, true) == device_provider::vulkan);
+    CHECK(select_device_provider(false, false) == device_provider::none);
+}

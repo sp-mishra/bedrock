@@ -51,6 +51,18 @@ namespace lithe::codegen::backends {
         metal,
     };
 
+    // Device-provider priority is platform-neutral: callers probe availability,
+    // then select native Metal before the Vulkan/MoltenVK portability path.
+    enum class device_provider : std::uint8_t { none, metal, vulkan };
+
+    [[nodiscard]] constexpr device_provider
+    select_device_provider(const bool metal_is_available,
+                           const bool vulkan_is_available) noexcept {
+        if (metal_is_available) return device_provider::metal;
+        if (vulkan_is_available) return device_provider::vulkan;
+        return device_provider::none;
+    }
+
     using backend_variant = std::variant<
         debug_text_backend,
         null_backend,
