@@ -1183,11 +1183,10 @@ namespace lithe::codegen::backends {
                 }
             }
 
-            // Iteration guard: cap total block visits so a malformed MIR with a
-            // cyclic branch that never reaches a terminator cannot hang the
-            // interpreter. Generous bound (blocks × 4096 + 4096) — real loops are
-            // bounded by their induction MIR, not this guard.
-            const std::size_t max_block_visits = blocks.size() * 4096u + 4096u;
+            // Preserve the conservative guard for raw MIR, but honor a larger
+            // budget derived from verified structured counted-loop bounds.
+            const std::size_t max_block_visits = fn.execution_block_visit_budget.value_or(
+                blocks.size() * 4096u + 4096u);
             std::size_t visits = 0;
 
             // Reused across all instructions — only written on failure, so the

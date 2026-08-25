@@ -157,14 +157,16 @@ namespace crank_ex {
         const std::string_view workload,
         const std::string_view equivalence,
         const profiler::ProfileResult& native,
-        const profiler::ProfileResult& trampoline) {
+        const profiler::ProfileResult& candidate_result,
+        const profiler::execution_mechanism candidate =
+            profiler::execution_mechanism::typed_host_trampoline) {
         lg::info("{}\n{}", title,
                  profiler::format_execution_comparison(
                      {.workload = workload,
                       .equivalence = equivalence,
                       .baseline = profiler::execution_mechanism::native_cpp,
-                      .candidate = profiler::execution_mechanism::typed_host_trampoline},
-                     native, trampoline));
+                      .candidate = candidate},
+                     native, candidate_result));
     }
 
     static void log_interpreter_probe(
@@ -1674,24 +1676,34 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             "Both samples execute identical calls; candidate crosses the typed host trampoline per call.",
             fib_cpp.profile, fib_crank.profile);
 
-        // ── bench3: sum(1..N) — HL MIR interpreter loop vs native C++ ────────────
-        // Crank side: lower a structured_for loop and execute via interpreter.
-        // This measures the real end-to-end HL-MIR-interpreter cost against native.
+        // ── bench3: sum(1..N) — value-carrying physical MIR vs native C++ ───────
+        // The Crank loop carries its accumulator through the structured region;
+        // both sides return the identical Gaussian sum.
         constexpr std::int64_t kSumN = 100'000;
 
-        lower_input sum_inp;
-        sum_inp.fn_name = "sum_loop";
-        sum_inp.loops.push_back({
-            .lower = 1, .upper = kSumN + 1, .step = 1,
-            .is_parallel = false, .name = "i"
-        });
-        auto sum_hl = lower_to_hl(std::move(sum_inp));
+        const auto make_sum_input = [] {
+            lower_input inp;
+            inp.fn_name = "sum_loop";
+            inp.scalar.constants = {{.result = 1, .value = 0}};
+            inp.scalar.return_value = 2;
+            inp.loops.push_back({
+                .lower = 1, .upper = kSumN + 1, .step = 1,
+                .is_parallel = false, .name = "i"
+            });
+            inp.loop_reductions = {{
+                .initial_value = 1, .result_value = 2, .kind = scalar_op_kind::add
+            }};
+            return inp;
+        };
+
+        auto sum_hl = lower_to_hl(make_sum_input());
         if (!sum_hl.ok()) return testfw::fail("ex40: lower sum_loop failed");
 
         cfg.label = "sum_cpp_100k";
         auto sum_cpp = profiler::measure(cfg, []() noexcept -> std::int64_t {
+            volatile std::int64_t bound = kSumN;
             std::int64_t s = 0;
-            for (std::int64_t i = 1; i <= kSumN; ++i) s += i;
+            for (std::int64_t i = 1; i <= bound; ++i) s += i;
             return s;
         });
 
@@ -1699,44 +1711,82 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
         // execute-only benchmark below does not pay lowering cost per iteration.
         auto sum_lp = lower_to_physical(sum_hl);
         if (!sum_lp.ok()) return testfw::fail("ex40: lower_to_physical sum_loop failed");
-        auto sum_phys_stats = execute_physical(*sum_lp.phys).stats;
+
+        // Warm the native artifact once.  Timed native samples below therefore
+        // measure cached JIT invocation of this exact physical MIR, rather than
+        // conflating first-use compilation with execution.  Keep the fallback
+        // visible: an interpreter result must never be presented as a JIT result.
+        const std::int64_t expected_sum = kSumN * (kSumN + 1) / 2;
+        const auto sum_jit_probe = execute_physical(
+            *sum_lp.phys, {}, {.path = execute_options::execution_path::native_only});
+        if (!sum_jit_probe.return_value || *sum_jit_probe.return_value != expected_sum)
+            return testfw::fail("ex40: native JIT sum result mismatch");
+        const bool sum_jit_available = !sum_jit_probe.fallback_fired;
+        const auto sum_phys_stats = sum_jit_probe.stats;
+
+        if (sum_jit_available) {
+            cfg.label = "sum_crank_jit_100k";
+            auto sum_crank_jit = profiler::measure(cfg, [&]() {
+                const auto run = execute_physical(
+                    *sum_lp.phys, {}, {.path = execute_options::execution_path::native_only});
+                return run.return_value.value_or(-1);
+            });
+            if (sum_crank_jit.return_values.empty()
+                || sum_crank_jit.return_values[0] != expected_sum)
+                return testfw::fail("ex40: cached native JIT sum result mismatch");
+            log_equivalent_benchmark(
+                "crank ex40 bench3 (cached native JIT)",
+                "Integer sum over the range 1 through 100,000",
+                "Both samples compute the same loop-carried integer reduction; JIT compilation was warmed before timing.",
+                sum_cpp.profile, sum_crank_jit.profile,
+                profiler::execution_mechanism::native_jit);
+        } else {
+            lg::info("crank ex40 bench3: native JIT unavailable; native-only request used the interpreter fallback");
+        }
 
         // Crank execute-only: interpret the already-lowered physical MIR.
         cfg.label = "sum_crank_exec_100k";
         auto sum_crank_exec = profiler::measure(cfg, [&]() {
-            return execute_physical(*sum_lp.phys).ok() ? 1 : 0;
+            const auto run = execute_physical(
+                *sum_lp.phys, {}, {.path = execute_options::execution_path::interpreter_only});
+            return run.return_value.value_or(-1);
         });
 
         // Crank full-phase: re-lower + execute each iteration (fresh HL result so
         // the physical-MIR cache is cold), isolating lowering + interpret cost.
         cfg.label = "sum_crank_full_100k";
         auto sum_crank_full = profiler::measure(cfg, [&]() {
-            lower_input inp;
-            inp.fn_name = "sum_loop";
-            inp.loops.push_back({
-                .lower = 1, .upper = kSumN + 1, .step = 1,
-                .is_parallel = false, .name = "i"
-            });
-            const auto hl = lower_to_hl(std::move(inp));
-            return execute_via_interpreter(hl).ok() ? 1 : 0;
+            const auto hl = lower_to_hl(make_sum_input());
+            if (!hl.ok()) return std::int64_t{-1};
+            const auto run = execute_via_interpreter(hl);
+            return run.return_value.value_or(-1);
         });
 
-        // Gaussian sum formula sanity check for C++ path.
-        const std::int64_t expected_sum = kSumN * (kSumN + 1) / 2;
+        // All remaining samples must produce the same value before performance is
+        // compared.  A volatile loop bound prevents the native compiler from
+        // replacing the benchmarked loop with the closed-form expression.
         if (!sum_cpp.return_values.empty() && sum_cpp.return_values[0] != expected_sum)
             return testfw::fail("ex40: sum_cpp result incorrect");
-        lg::info("crank ex40 bench3: native sum(1..{}) result={} (not compared to the probes)\n"
+        if (sum_crank_exec.return_values.empty() || sum_crank_full.return_values.empty()
+            || sum_crank_exec.return_values[0] != expected_sum
+            || sum_crank_full.return_values[0] != expected_sum)
+            return testfw::fail("ex40: physical MIR sum result mismatch");
+        lg::info("crank ex40 bench3: sum(1..{}) result={} across native and value-carrying MIR\n"
                  "  physical-MIR lowering once: {:.2f} us; instrs={}; blocks={}",
                  kSumN, expected_sum, static_cast<double>(sum_lp.lower_ns) / 1000.0,
                  sum_phys_stats.instr_count, sum_phys_stats.block_count);
-        log_interpreter_probe(
-            "crank ex40 bench3 (cached physical MIR)", "structured loop dispatch",
-            sum_crank_exec.profile,
-            "The physical MIR contains loop control only; it does not compute the native Gaussian sum.");
-        log_interpreter_probe(
-            "crank ex40 bench3 (full lowering plus interpretation)", "structured loop dispatch",
-            sum_crank_full.profile,
-            "The workload is loop control only; it is not an equivalent native-sum comparison.");
+        log_equivalent_benchmark(
+            "crank ex40 bench3 (cached value-carrying physical MIR)",
+            "Integer sum over the range 1 through 100,000",
+            "Both samples compute the same loop-carried integer reduction; physical MIR is already lowered.",
+            sum_cpp.profile, sum_crank_exec.profile,
+            profiler::execution_mechanism::physical_mir_interpreter);
+        log_equivalent_benchmark(
+            "crank ex40 bench3 (full lowering plus interpretation)",
+            "Integer sum over the range 1 through 100,000",
+            "Both samples compute the same loop-carried integer reduction; candidate includes fresh lowering.",
+            sum_cpp.profile, sum_crank_full.profile,
+            profiler::execution_mechanism::full_lowering_and_interpretation);
 
         lg::info("crank ex40 (C++ vs Crank benchmarks): all comparisons complete");
         return {};

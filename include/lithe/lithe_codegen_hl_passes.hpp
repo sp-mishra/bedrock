@@ -1,6 +1,8 @@
 #pragma once
 #include "lithe_codegen_pipeline.hpp"  // cfg_analysis_result, hl types, poly types
 
+#include <limits>
+
 // ============================================================================
 // HL MIR Passes — namespace lithe::codegen::hl
 // ============================================================================
@@ -703,6 +705,23 @@ namespace lithe::codegen::hl {
                             }
 
                             const auto& b = sf.bounds[0];
+
+                            if (sf.trip_count_hint != 0) {
+                                const auto body_blocks = op->regions[0]->blocks.size();
+                                const auto visits_per_trip = body_blocks + 2u; // header + latch
+                                const auto trips = static_cast<std::size_t>(sf.trip_count_hint);
+                                const auto max_size = std::numeric_limits<std::size_t>::max();
+                                // Account for the prolog, the final failed header
+                                // check, and the exit continuation in addition to
+                                // the per-iteration header/body/latch visits.
+                                const auto fixed_visits = 4u;
+                                const auto budget = trips > (max_size - fixed_visits) / visits_per_trip
+                                    ? max_size : trips * visits_per_trip + fixed_visits;
+                                if (!flat.execution_block_visit_budget
+                                    || budget > *flat.execution_block_visit_budget) {
+                                    flat.execution_block_visit_budget = budget;
+                                }
+                            }
 
                             // Reserve block ids for header, latch, exit.
                             auto header_blk = fresh_block();

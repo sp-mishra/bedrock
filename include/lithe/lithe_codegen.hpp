@@ -1720,6 +1720,10 @@ namespace lithe::codegen {
             std::optional<prologue_plan> prologue;
             std::optional<epilogue_plan> epilogue;
             std::optional<stack_map_artifact> stack_map; // populated by safepoint_injection_pass
+            // Optional execution budget derived by structured lowering for a
+            // verified counted loop. Raw physical MIR retains the interpreter's
+            // conservative fallback guard.
+            std::optional<std::size_t> execution_block_visit_budget;
             phase_metadata metadata;
 
             physical_mir_function() = default;

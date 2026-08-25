@@ -524,6 +524,7 @@ if (BEDROCK_BUILD_EXAMPLES)
     target_link_libraries(bedrock_examples PRIVATE
         bedrock::pebble
         bedrock::crank
+        bedrock::lithe_asmjit
         bedrock::lithe_simd
         bedrock::medha
         spdlog::spdlog_header_only)
