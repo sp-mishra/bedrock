@@ -560,7 +560,7 @@ if (BUILD_TESTS)
     endif()
     add_executable(bedrock_tests ${TEST_SOURCE})
     target_include_directories(bedrock_tests PRIVATE
-        "${CMAKE_SOURCE_DIR}/src/tests")
+        "${CMAKE_SOURCE_DIR}/src/tests/lithe")
     target_link_libraries(bedrock_tests PRIVATE
             Catch2
             bedrock::lithe
