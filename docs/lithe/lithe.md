@@ -18,9 +18,11 @@ HL-MIR legality and binding plan with Vulkan: verified rank-1 contiguous f32
 elementwise regions (loads, stores, arithmetic, comparisons, select, and f32
 constants) lower to MSL, compile through `dependencies/metal-cpp`, and
 dispatch through Pravaha. The earlier physical-MIR integer path remains a
-compatibility route. Reductions, non-contiguous or dynamic layouts, mixed
-types, calls, and control flow are rejected with diagnostics until their ABI
-and lowering are explicit.
+compatibility route. Loop-carried reductions are recognized by the shared
+device plan and deliberately rejected by the current elementwise emitters:
+they require an explicit workgroup reduction ABI. Non-contiguous or dynamic
+layouts, mixed types, calls, and control flow are likewise rejected until their
+ABI and lowering are explicit.
 Consumers that call this native path link `bedrock::lithe_metal`; the stable
 API remains `lithe::codegen::backends::metal_backend` and does not expose
 Metal-C++ types.

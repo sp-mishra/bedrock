@@ -42,6 +42,11 @@ namespace lithe::codegen::backends {
 
         [[nodiscard]] inline std::string lower_hl_to_msl(const device::kernel_plan& plan,
                                                           std::vector<std::string>& diagnostics) {
+            if (plan.requirements.loop_carried_values) {
+                diagnostics.push_back(
+                    "metal: loop-carried reductions require a workgroup reduction lowering");
+                return {};
+            }
             if (!plan.elementwise_dispatch_compatible()) {
                 diagnostics.push_back("metal: HL kernel is outside the elementwise dispatch contract");
                 return {};

@@ -1259,7 +1259,7 @@ during `ctx.analyse()`.
 | Feature                                                                                        | Status                                                                                                                                                           | §ref                    |
 |------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
 | Scalar (straight-line) execution                                                               | Implemented                                                                                                                                                      | §10.2                   |
-| CFG-aware scalar execution (branches, loops, match, early return, defer, guards, transactions) | Implemented — `branch`/`branch_cond` interpreted                                                                                                                 | §10.2                   |
+| CFG interpretation (branches, loops, match, early return, defer, guards, transactions)          | Implemented — `branch`/`branch_cond` interpreted; loop-carried scalar results are pending                                                                        | §10.2                   |
 | Parallel for/reduce/map                                                                        | Implemented — lowers to Pravaha                                                                                                                                  | §6.2                    |
 | spawn/await                                                                                    | Implemented                                                                                                                                                      | §7                      |
 | Transactions (compile-time checks)                                                             | Implemented                                                                                                                                                      | §7c                     |
@@ -2015,11 +2015,12 @@ auto result = crank::o3_profile{}(expr);
 
 `lower_to_hl(lower_input)` → `lower_hl_result`
 
-Input: per-function descriptor — loop bounds, tensors, defer sites, exit edges, safety policy.
+Input: per-function descriptor — scalar SSA, loop bounds, tensors, defer sites, exit edges, safety policy.
 
 | Step                                  | Output                                                       |
 |---------------------------------------|--------------------------------------------------------------|
 | Loop → `structured_for`               | `is_parallel` flag from `loop_bounds_info`                   |
+| Scalar SSA → `constant` / `add` / `sub` / `mul` / `div` | Explicit operands/results; optional scalar `ret` |
 | Tensor → `memref_load`/`memref_store` | Row-major `memref_type` derived from `tensor_info`           |
 | Defer sites → `crank_defer_list`      | Per-block LIFO cleanup list                                  |
 | Exit edges → `crank_exit_edge`        | `controlled` edges carry LIFO defer list; `trap` edges don't |
@@ -2041,6 +2042,14 @@ lower_to_hl → lower_hl_result
 ```
 
 **`execute_via_interpreter(hl_res, args, opts)`** — always-available path, zero external deps.
+
+**Value-carrying subset.** `lower_input::scalar` is the current executable
+integer SSA contract: constants and `add`/`sub`/`mul`/`div` retain explicit
+operands, results, and an optional return value through physical MIR. A rank-1
+integer reduction carries one accumulator through structured-loop block
+arguments and returns its final value through `region_yield`. Nested and
+multi-accumulator reductions remain pending. Device reduction lowering is a
+separate workgroup ABI and currently falls back to CPU execution.
 
 **`execute_with_auto_fallback(hl_res, args, opts)`** — capability-aware; tries `opts.primary_backend_name`, falls back
 to interpreter + diagnostic trace.
@@ -2079,12 +2088,11 @@ execute_planned:
   interpreter fallback (scalar candidate or construct_plan failure)
 ```
 
-> **Interpreter control flow:** `interpreter_backend` executes control-flow graphs. `branch` and `branch_cond` opcodes
-> are interpreted, so functions containing loops (lowered from `structured_for`), `if`/`match`, early `return`, `defer`,
-> guards, and transactions run to a scalar result. `coordinate_lowering_pass` lowers and verifies the CFG;
-`execute_via_interpreter` and `execute_with_auto_fallback` then evaluate it. Opcodes that require host linkage — `call`
-> into host functions and `load_symbol` — are not executed by the scalar interpreter; those paths route to a backend or
-> the host boundary.
+> **Interpreter control flow:** `interpreter_backend` executes control-flow graphs, including `branch` and
+> `branch_cond`. A scalar result is produced only when the lowered MIR carries a value to `ret`; the current
+> `scalar_program` path does so for straight-line integer expressions. Structured loops currently model control flow
+> only; loop-carried results wait for structured-region arguments/yields. Opcodes requiring host linkage — `call` into
+> host functions and `load_symbol` — route to a backend or host boundary.
 
 `crank_execute_result::status` reports the outcome. The legacy `execution_status::unsupported_control_flow` enumerator
 is retained for source compatibility but is no longer produced by CFG functions:

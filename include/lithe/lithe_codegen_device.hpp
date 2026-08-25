@@ -71,6 +71,7 @@ namespace lithe::codegen::device {
 
     struct kernel_requirements {
         bool reduction = false;
+        bool loop_carried_values = false;
         bool non_contiguous_memory = false;
         bool dynamic_shape = false;
         bool control_flow = false;
@@ -200,6 +201,9 @@ namespace lithe::codegen::device {
         }
 
         const auto& loop = std::get<hl::structured_for_attr>(plan.root->attr);
+        plan.requirements.loop_carried_values = !plan.root->operands.empty()
+            || !plan.root->results.empty();
+        plan.requirements.reduction |= plan.requirements.loop_carried_values;
         if (loop.rank != 1) {
             plan.diagnostics.push_back("device: initial shared lowering supports one-dimensional parallel roots");
         }

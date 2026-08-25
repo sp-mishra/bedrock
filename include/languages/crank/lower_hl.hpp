@@ -47,8 +47,10 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace crank {
@@ -305,6 +307,55 @@ namespace crank {
             : name(std::move(n)), rank(r), elem_crank_type(std::move(et)), shape(std::move(s)) {}
     };
 
+    // ============================================================================
+    // scalar_program — typed scalar SSA supplied by the Crank semantic lowering.
+    //
+    // This deliberately models only values that have a direct, portable physical
+    // MIR representation today.  It is independent of source syntax, so semantic
+    // lowering can use it for expressions from any Crank surface construct.
+    // ============================================================================
+
+    using scalar_value_id = std::uint32_t;
+
+    struct scalar_constant {
+        scalar_value_id result = 0;
+        std::int64_t value = 0;
+    };
+
+    enum class scalar_op_kind : std::uint8_t {
+        add,
+        sub,
+        mul,
+        div,
+    };
+
+    struct scalar_operation {
+        scalar_op_kind kind = scalar_op_kind::add;
+        scalar_value_id result = 0;
+        scalar_value_id lhs = 0;
+        scalar_value_id rhs = 0;
+    };
+
+    struct scalar_program {
+        std::vector<scalar_constant> constants;
+        std::vector<scalar_operation> operations;
+        std::optional<scalar_value_id> return_value;
+
+        [[nodiscard]] bool empty() const noexcept {
+            return constants.empty() && operations.empty() && !return_value.has_value();
+        }
+    };
+
+    // A reduction binds one scalar accumulator to one structured loop.  Its
+    // initial value must be defined by scalar_program; the result becomes
+    // available after the loop.  The current portable contract is deliberately
+    // integer-only and uses the loop induction value as the right-hand operand.
+    struct loop_reduction_info {
+        scalar_value_id initial_value = 0;
+        scalar_value_id result_value = 0;
+        scalar_op_kind kind = scalar_op_kind::add;
+    };
+
     struct lower_input {
         std::string fn_name;
         std::vector<loop_bounds_info> loops; // one entry per nested loop level
@@ -318,6 +369,15 @@ namespace crank {
 
         // Phase B: integer arithmetic ops to lower.
         std::vector<int_op_info> int_ops;
+
+        // Executable scalar SSA from semantic expression lowering.  The legacy
+        // int_ops list remains structural metadata; scalar_program is the value-
+        // carrying representation consumed by physical MIR execution.
+        scalar_program scalar;
+
+        // One optional reduction descriptor per loop, in source nesting order.
+        // An absent list preserves the structural-loop lowering contract.
+        std::vector<loop_reduction_info> loop_reductions;
 
         // Phase C: safety obligations to lower → guard/trap.
         std::vector<obligation_info> obligations;
@@ -432,6 +492,18 @@ namespace crank {
             return op::sdiv;
         }
 
+        [[nodiscard]] inline lithe::codegen::hl::hl_opcode
+        scalar_op_to_opcode(scalar_op_kind k) noexcept {
+            using op = lithe::codegen::hl::hl_opcode;
+            switch (k) {
+            case scalar_op_kind::add: return op::add;
+            case scalar_op_kind::sub: return op::sub;
+            case scalar_op_kind::mul: return op::mul;
+            case scalar_op_kind::div: return op::div;
+            }
+            return op::add;
+        }
+
         // Map obligation_kind → trap_kind for the guard-failure trap block.
         [[nodiscard]] inline lithe::codegen::hl::trap_kind
         obligation_to_trap_kind(obligation_kind k) noexcept {
@@ -497,6 +569,19 @@ namespace crank {
         ++res.stats.block_count;
 
         hl_block* current = entry;
+
+        // A scalar_program supplies its own value-carrying return.  Rejecting a
+        // simultaneous structural return prevents an earlier zero-operand ret
+        // from making the scalar result unreachable in physical MIR.
+        if (inp.scalar.return_value) {
+            for (const auto& node : inp.cfg_nodes) {
+                if (node.kind == cfg_node_kind::ret) {
+                    res.diagnostics.push_back(
+                        "lower_to_hl: scalar return cannot be combined with a structural return");
+                    return res;
+                }
+            }
+        }
 
         // ── Phase A: CFG nodes (branch/branch_cond/ret/icmp/fcmp/select) ─────────
         //
@@ -843,6 +928,110 @@ namespace crank {
             ++res.stats.int_op_count;
         }
 
+        // ── Phase B.1: executable scalar SSA ───────────────────────────────────
+        // Values are deliberately kept separate from the structural integer-op
+        // inventory above.  This lets existing syntax/analysis clients keep their
+        // metadata while semantic expression lowering progressively adopts a real
+        // use-def graph.
+        std::unordered_map<scalar_value_id, ssa_value_id> scalar_values;
+        const auto define_scalar = [&](const scalar_value_id source_id) -> std::optional<ssa_value_id> {
+            if (source_id == 0) {
+                res.diagnostics.push_back("lower_to_hl: scalar value id 0 is reserved");
+                return std::nullopt;
+            }
+            if (scalar_values.contains(source_id)) {
+                res.diagnostics.push_back(
+                    "lower_to_hl: scalar value defined more than once: " +
+                    std::to_string(source_id));
+                return std::nullopt;
+            }
+            const ssa_value_id value{res.hl_fn.next_id++};
+            scalar_values.emplace(source_id, value);
+            return value;
+        };
+        const auto use_scalar = [&](const scalar_value_id source_id) -> std::optional<ssa_value_id> {
+            if (const auto it = scalar_values.find(source_id); it != scalar_values.end())
+                return it->second;
+            res.diagnostics.push_back(
+                "lower_to_hl: scalar value used before definition: " +
+                std::to_string(source_id));
+            return std::nullopt;
+        };
+
+        for (const auto& constant : inp.scalar.constants) {
+            const auto result_id = define_scalar(constant.result);
+            if (!result_id) continue;
+
+            hl_operation* op = res.hl_fn.make_op(hl_opcode::constant);
+            if (!op) {
+                res.diagnostics.push_back("lower_to_hl: arena exhausted at scalar constant");
+                break;
+            }
+            const auto results = res.hl_fn.alloc_span<ssa_value_id>(1);
+            if (results.empty()) {
+                res.diagnostics.push_back("lower_to_hl: arena exhausted at scalar constant result");
+                break;
+            }
+            results[0] = *result_id;
+            op->results = results;
+            op->attr = constant_attr::integer_value(constant.value);
+            current->ops.push_back(op);
+        }
+
+        for (const auto& operation : inp.scalar.operations) {
+            const auto lhs = use_scalar(operation.lhs);
+            const auto rhs = use_scalar(operation.rhs);
+            const auto result_id = define_scalar(operation.result);
+            if (!lhs || !rhs || !result_id) continue;
+
+            hl_operation* op = res.hl_fn.make_op(detail::scalar_op_to_opcode(operation.kind));
+            if (!op) {
+                res.diagnostics.push_back("lower_to_hl: arena exhausted at scalar operation");
+                break;
+            }
+            const auto operands = res.hl_fn.alloc_span<ssa_value_id>(2);
+            const auto results = res.hl_fn.alloc_span<ssa_value_id>(1);
+            if (operands.empty() || results.empty()) {
+                res.diagnostics.push_back("lower_to_hl: arena exhausted at scalar operation values");
+                break;
+            }
+            operands[0] = *lhs;
+            operands[1] = *rhs;
+            results[0] = *result_id;
+            op->operands = operands;
+            op->results = results;
+            current->ops.push_back(op);
+            ++res.stats.int_op_count;
+        }
+
+        std::optional<scalar_value_id> deferred_scalar_return;
+        if (inp.scalar.return_value) {
+            if (!inp.loop_reductions.empty()) {
+                deferred_scalar_return = *inp.scalar.return_value;
+            }
+            else {
+                const auto value = use_scalar(*inp.scalar.return_value);
+                if (value) {
+                    hl_operation* ret = res.hl_fn.make_op(hl_opcode::ret);
+                    if (!ret) {
+                        res.diagnostics.push_back("lower_to_hl: arena exhausted at scalar return");
+                    }
+                    else {
+                        const auto operands = res.hl_fn.alloc_span<ssa_value_id>(1);
+                        if (operands.empty()) {
+                            res.diagnostics.push_back("lower_to_hl: arena exhausted at scalar return value");
+                        }
+                        else {
+                            operands[0] = *value;
+                            ret->operands = operands;
+                            current->ops.push_back(ret);
+                            ++res.stats.ret_count;
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Phase C: obligations → guard / trap ───────────────────────────────────
         for (const auto& ob : inp.obligations) {
             if (ob.status == obligation_status::proven) {
@@ -1018,7 +1207,21 @@ namespace crank {
         }
 
         // ── Phase 0: structured_for per loop ──────────────────────────────────────
-        for (const auto& li : inp.loops) {
+        // The first value-carrying loop contract is intentionally narrow: one
+        // rank-1 loop with one integer accumulator.  Nested reductions require
+        // an explicit multi-region yield contract rather than ad-hoc register
+        // sharing, so they are rejected until that generalization is added.
+        if (!inp.loop_reductions.empty()
+            && (inp.loop_reductions.size() != inp.loops.size() || inp.loops.size() != 1)) {
+            res.diagnostics.push_back(
+                "lower_to_hl: value-carrying reductions currently require exactly one loop");
+            return res;
+        }
+
+        for (std::size_t loop_index = 0; loop_index < inp.loops.size(); ++loop_index) {
+            const auto& li = inp.loops[loop_index];
+            const loop_reduction_info* reduction = inp.loop_reductions.empty()
+                ? nullptr : std::addressof(inp.loop_reductions[loop_index]);
             hl_operation* sf_op = res.hl_fn.make_op(hl_opcode::structured_for);
             if (!sf_op) {
                 res.diagnostics.push_back("lower_to_hl: arena exhausted at structured_for");
@@ -1047,6 +1250,25 @@ namespace crank {
             }
             sf_op->attr = attr;
 
+            std::optional<ssa_value_id> initial_accumulator;
+            std::optional<ssa_value_id> final_accumulator;
+            if (reduction) {
+                initial_accumulator = use_scalar(reduction->initial_value);
+                final_accumulator = define_scalar(reduction->result_value);
+                if (!initial_accumulator || !final_accumulator) return res;
+
+                const auto operands = res.hl_fn.alloc_span<ssa_value_id>(1);
+                const auto results = res.hl_fn.alloc_span<ssa_value_id>(1);
+                if (operands.empty() || results.empty()) {
+                    res.diagnostics.push_back("lower_to_hl: arena exhausted at loop-carried values");
+                    return res;
+                }
+                operands[0] = *initial_accumulator;
+                results[0] = *final_accumulator;
+                sf_op->operands = operands;
+                sf_op->results = results;
+            }
+
             hl_region* loop_body = res.hl_fn.make_region();
             if (!loop_body) {
                 res.diagnostics.push_back("lower_to_hl: arena exhausted at loop region");
@@ -1062,6 +1284,53 @@ namespace crank {
             loop_block->parent_region = loop_body;
             loop_body->blocks.push_back(loop_block);
 
+            if (reduction) {
+                // Block argument 0 is the induction variable; argument 1 is the
+                // incoming accumulator.  region_yield supplies its next value.
+                const auto block_args = res.hl_fn.alloc_span<ssa_value_id>(2);
+                if (block_args.empty()) {
+                    res.diagnostics.push_back("lower_to_hl: arena exhausted at loop block arguments");
+                    return res;
+                }
+                const ssa_value_id induction_value{res.hl_fn.next_id++};
+                const ssa_value_id carried_value{res.hl_fn.next_id++};
+                block_args[0] = induction_value;
+                block_args[1] = carried_value;
+                loop_block->block_args = block_args;
+
+                hl_operation* index_op = res.hl_fn.make_op(hl_opcode::loop_index);
+                hl_operation* update_op = res.hl_fn.make_op(
+                    detail::scalar_op_to_opcode(reduction->kind));
+                hl_operation* yield_op = res.hl_fn.make_op(hl_opcode::region_yield);
+                if (!index_op || !update_op || !yield_op) {
+                    res.diagnostics.push_back("lower_to_hl: arena exhausted at loop reduction body");
+                    return res;
+                }
+                const auto index_results = res.hl_fn.alloc_span<ssa_value_id>(1);
+                const auto update_operands = res.hl_fn.alloc_span<ssa_value_id>(2);
+                const auto update_results = res.hl_fn.alloc_span<ssa_value_id>(1);
+                const auto yield_operands = res.hl_fn.alloc_span<ssa_value_id>(1);
+                if (index_results.empty() || update_operands.empty()
+                    || update_results.empty() || yield_operands.empty()) {
+                    res.diagnostics.push_back("lower_to_hl: arena exhausted at loop reduction values");
+                    return res;
+                }
+                const ssa_value_id updated_value{res.hl_fn.next_id++};
+                index_results[0] = induction_value;
+                update_operands[0] = carried_value;
+                update_operands[1] = induction_value;
+                update_results[0] = updated_value;
+                yield_operands[0] = updated_value;
+                index_op->results = index_results;
+                update_op->operands = update_operands;
+                update_op->results = update_results;
+                yield_op->operands = yield_operands;
+                loop_block->ops.push_back(index_op);
+                loop_block->ops.push_back(update_op);
+                loop_block->ops.push_back(yield_op);
+                ++res.stats.int_op_count;
+            }
+
             auto regions_span = res.hl_fn.alloc_span<hl_region*>(1);
             if (!regions_span.empty()) {
                 regions_span[0] = loop_body;
@@ -1069,12 +1338,28 @@ namespace crank {
             }
 
             current->ops.push_back(sf_op);
-            current = loop_block;
+            if (!reduction) current = loop_block;
 
             ++res.stats.structured_for_count;
             ++res.stats.block_count;
             ++res.stats.max_loop_nest;
             if (li.is_parallel) ++res.stats.parallel_loop_count;
+        }
+
+        if (deferred_scalar_return) {
+            const auto value = use_scalar(*deferred_scalar_return);
+            if (!value) return res;
+            hl_operation* ret = res.hl_fn.make_op(hl_opcode::ret);
+            const auto operands = ret ? res.hl_fn.alloc_span<ssa_value_id>(1)
+                                      : std::span<ssa_value_id>{};
+            if (!ret || operands.empty()) {
+                res.diagnostics.push_back("lower_to_hl: arena exhausted at loop reduction return");
+                return res;
+            }
+            operands[0] = *value;
+            ret->operands = operands;
+            current->ops.push_back(ret);
+            ++res.stats.ret_count;
         }
 
         // ── Memref stubs per tensor ───────────────────────────────────────────────

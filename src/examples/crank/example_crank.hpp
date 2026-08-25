@@ -1539,6 +1539,43 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             lg::info("crank ex39: pi_estimate({}) = {:.6f}", 1000, result);
         }
 
+        // Verify the value-carrying scalar MIR path independently of the host
+        // trampoline: (6 * 7) + 0 == 42.
+        lower_input scalar_inp;
+        scalar_inp.fn_name = "scalar_mir_arithmetic";
+        scalar_inp.scalar.constants = {
+            {.result = 1, .value = 6},
+            {.result = 2, .value = 7},
+            {.result = 3, .value = 0},
+        };
+        scalar_inp.scalar.operations = {
+            {.kind = scalar_op_kind::mul, .result = 4, .lhs = 1, .rhs = 2},
+            {.kind = scalar_op_kind::add, .result = 5, .lhs = 4, .rhs = 3},
+        };
+        scalar_inp.scalar.return_value = 5;
+        const auto scalar_hl = lower_to_hl(std::move(scalar_inp));
+        if (!scalar_hl.ok()) return testfw::fail("ex39: lower scalar MIR arithmetic failed");
+        const auto scalar_exec = execute_via_interpreter(scalar_hl);
+        if (!scalar_exec.ok() || scalar_exec.return_value != 42)
+            return testfw::fail("ex39: scalar MIR arithmetic returned an unexpected value");
+
+        // Verify a value-carrying structured loop: sum(i, i=0..9) == 45.
+        lower_input reduction_inp;
+        reduction_inp.fn_name = "scalar_mir_sum";
+        reduction_inp.scalar.constants = {{.result = 1, .value = 0}};
+        reduction_inp.scalar.return_value = 2;
+        reduction_inp.loops.push_back({
+            .lower = 0, .upper = 10, .step = 1, .is_parallel = false, .name = "i"
+        });
+        reduction_inp.loop_reductions = {{
+            .initial_value = 1, .result_value = 2, .kind = scalar_op_kind::add
+        }};
+        const auto reduction_hl = lower_to_hl(std::move(reduction_inp));
+        if (!reduction_hl.ok()) return testfw::fail("ex39: lower scalar MIR reduction failed");
+        const auto reduction_exec = execute_via_interpreter(reduction_hl);
+        if (!reduction_exec.ok() || reduction_exec.return_value != 45)
+            return testfw::fail("ex39: scalar MIR reduction returned an unexpected value");
+
         // Also exercise the HL MIR lowering path for structural verification.
         lower_input pi_inp;
         pi_inp.fn_name = "pi_estimate";

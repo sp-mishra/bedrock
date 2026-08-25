@@ -573,6 +573,10 @@ namespace lithe::codegen::hl {
 
             // Map ssa_value_id → flat preg for scalar values.
             std::unordered_map<std::uint64_t, preg> ssa_to_preg;
+            // Active only while lowering one value-carrying structured loop body.
+            // A region_yield copies its operands into these loop-carried registers
+            // before branching to the loop latch.
+            std::vector<preg> active_yield_targets;
 
             auto fresh_preg = [&]() -> preg {
                 const auto id = static_cast<std::uint16_t>(next_preg_id++);
@@ -669,8 +673,10 @@ namespace lithe::codegen::hl {
                     // here we simply allocate the receiving registers so downstream
                     // ssa_to_preg lookups resolve correctly.
                     for (const ssa_value_id& arg_id : hblk->block_args) {
-                        preg arg_preg = fresh_preg();
-                        ssa_to_preg[arg_id.id] = arg_preg;
+                        if (!ssa_to_preg.contains(arg_id.id)) {
+                            preg arg_preg = fresh_preg();
+                            ssa_to_preg[arg_id.id] = arg_preg;
+                        }
                     }
 
                     for (const hl_operation* op = hblk->ops.head;
@@ -707,34 +713,62 @@ namespace lithe::codegen::hl {
                             const std::uint32_t latch_id = latch_blk.id;
                             const std::uint32_t exit_id = exit_blk.id;
 
-                            // Prolog: init IV in current flat_blk, jump to header.
+                            // Prolog: initialize the IV, then enter the header.
                             preg iv = fresh_preg();
                             emit_load_imm(flat_blk, iv, b.lower);
                             emit_branch(flat_blk, header_id);
                             flat.function.blocks.push_back(std::move(flat_blk));
 
-                            // Header (canonical form expected by extract_polyhedral_pass):
-                            //   add IV += step  (detected as IV by bottom-up pass)
-                            //   cmp_lt IV < upper
-                            //   branch_cond → body | exit
-                            // Body loops back to header directly; latch block is a bare
-                            // back-edge jump so the CFG shape is still well-formed.
+                            // Header tests the initial IV before entering the body;
+                            // the latch performs the increment.  This preserves the
+                            // declared half-open [lower, upper) iteration space.
                             preg cond = fresh_preg();
+
+                            std::vector<preg> carried;
+                            if (!op->operands.empty() || !op->results.empty()) {
+                                if (op->operands.size() != op->results.size()) {
+                                    out.diagnostics.push_back(
+                                        "coord_lower: structured_for loop-carried operand/result count mismatch");
+                                    continue;
+                                }
+                                const hl_block* body_block = op->regions[0]->blocks.head;
+                                if (!body_block || body_block->block_args.size() != op->operands.size() + 1) {
+                                    out.diagnostics.push_back(
+                                        "coord_lower: structured_for loop body must have IV plus carried block arguments");
+                                    continue;
+                                }
+                                ssa_to_preg[body_block->block_args[0].id] = iv;
+                                carried.reserve(op->operands.size());
+                                for (std::size_t i = 0; i < op->operands.size(); ++i) {
+                                    const auto source = ssa_to_preg.find(op->operands[i].id);
+                                    if (source == ssa_to_preg.end()) {
+                                        out.diagnostics.push_back(
+                                            "coord_lower: loop-carried initial value is not defined");
+                                        continue;
+                                    }
+                                    carried.push_back(source->second);
+                                    ssa_to_preg[body_block->block_args[i + 1].id] = source->second;
+                                    ssa_to_preg[op->results[i].id] = source->second;
+                                }
+                                if (carried.size() != op->operands.size()) continue;
+                                active_yield_targets = carried;
+                            }
                             // Lower body recursively; its exit falls to latch.
                             std::uint32_t body_first_id =
                                 self(self, *op->regions[0], latch_id);
+                            active_yield_targets.clear();
 
                             // Empty body region lowers to zero blocks: cycle the loop
                             // directly through the latch so the header→latch→header
                             // back-edge stays well-formed (no dangling bb0 target).
                             if (body_first_id == 0) body_first_id = latch_id;
 
-                            emit_add(header_blk, iv, iv, b.step);
                             emit_cmp_lt(header_blk, cond, iv, b.upper);
                             emit_branch_cond(header_blk, cond, body_first_id, exit_id);
                             flat.function.blocks.push_back(std::move(header_blk));
 
-                            // Latch: bare back-edge to header (body exits here).
+                            // Latch advances IV after the body and loops back.
+                            emit_add(latch_blk, iv, iv, b.step);
                             emit_branch(latch_blk, header_id);
                             flat.function.blocks.push_back(std::move(latch_blk));
 
@@ -1258,6 +1292,23 @@ namespace lithe::codegen::hl {
                         }
                         else if (op->op == hl_opcode::region_yield ||
                                  op->op == hl_opcode::ret) {
+                            if (op->op == hl_opcode::region_yield && !active_yield_targets.empty()) {
+                                if (op->operands.size() != active_yield_targets.size()) {
+                                    out.diagnostics.push_back(
+                                        "coord_lower: region_yield loop-carried value count mismatch");
+                                }
+                                else {
+                                    for (std::size_t i = 0; i < op->operands.size(); ++i) {
+                                        const auto value = ssa_to_preg.find(op->operands[i].id);
+                                        if (value == ssa_to_preg.end()) {
+                                            out.diagnostics.push_back(
+                                                "coord_lower: region_yield references an undefined value");
+                                            continue;
+                                        }
+                                        emit_add(flat_blk, active_yield_targets[i], value->second, 0);
+                                    }
+                                }
+                            }
                             // Nested yields continue in their parent. A root
                             // yield/ret becomes a physical return and carries
                             // its SSA result when one is present.
@@ -1296,6 +1347,16 @@ namespace lithe::codegen::hl {
                             } else if (!op->results.empty()) {
                                 out.diagnostics.push_back(
                                     "coord_lower: constant missing constant_attr");
+                            }
+                            continue;
+                        }
+                        else if (op->op == hl_opcode::loop_index) {
+                            // loop_index is represented by the first body block
+                            // argument, pre-bound to the physical IV above.
+                            if (op->results.size() != 1
+                                || !ssa_to_preg.contains(op->results[0].id)) {
+                                out.diagnostics.push_back(
+                                    "coord_lower: loop_index is missing its induction-value binding");
                             }
                             continue;
                         }

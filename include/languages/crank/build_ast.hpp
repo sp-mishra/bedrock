@@ -41,6 +41,7 @@
 #include "languages/generic/ast/ast_arena.hpp"
 #include "languages/generic/ir/ir_module.hpp"
 
+#include <algorithm>
 #include <any>
 #include <cassert>
 #include <string>
@@ -425,9 +426,15 @@ namespace crank {
     class AstBuilder {
     public:
         explicit AstBuilder(std::string_view src, vakya::property_store& store,
-                            parse_stats* stats = nullptr)
+                            parse_stats* stats = nullptr,
+                            std::size_t node_capacity_hint = 0)
             : src_(src), store_(store), stats_(stats),
-              typed_root_(std::make_shared<crank_source_file>()) {}
+              typed_root_(std::make_shared<crank_source_file>()) {
+            if (node_capacity_hint != 0) {
+                typed_root_->arena.reserve(node_capacity_hint);
+                typed_root_->ir_mod.reserve(node_capacity_hint, node_capacity_hint);
+            }
+        }
 
         /// Run the walk on a traverse_range from a parse_tree.
     /// Returns the root Vakya node (opaque std::any — host/plugin boundary only).
@@ -442,6 +449,10 @@ namespace crank {
             };
 
             std::vector<Frame> stack;
+            // Parser nesting is usually much shallower than token count.  This
+            // capacity is only a hint; vector grows normally for deeply nested
+            // generated input.
+            stack.reserve(std::min<std::size_t>(src_.size() / 16 + 1, 256));
             stack.push_back({});
             uint32_t current_depth = 0;
 
@@ -1067,7 +1078,11 @@ namespace crank {
             return result;
         }
 
-        AstBuilder builder(src, store, stats);
+        // Crank's flat AST and generic IR are both populated from parse-tree
+        // events.  A conservative source-derived hint avoids repeated vector
+        // growth on normal source files without reserving one entry per byte.
+        const std::size_t node_capacity_hint = src.empty() ? 0 : src.size() / 4 + 1;
+        AstBuilder builder(src, store, stats, node_capacity_hint);
         result.root = builder.walk(tree.traverse());
         result.typed_ast_root = builder.typed_root();
         result.diagnostics = std::move(builder.diagnostics());
@@ -1075,4 +1090,3 @@ namespace crank {
         return result;
     }
 } // namespace crank
-
