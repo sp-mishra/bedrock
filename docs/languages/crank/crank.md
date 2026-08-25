@@ -4784,7 +4784,6 @@ If those questions do not justify grammar, the feature must not become syntax.
 
 - `docs/languages/crank/grammar.md` — full grammar
 - `include/languages/crank/` — all headers
-- `src/examples/example_crank.hpp` — comprehensive 38-exercise tutorial
-  (ex01–ex30 per-stage; ex31–ex38 full end-to-end pipeline runs: scalar
-  arithmetic, loop with defer, generic reduction, transactional transfer,
-  SIMD elementwise, GPU elementwise, host function call, AOT MIR round-trip)
+- `src/examples/crank/example_crank.hpp` — comprehensive 55-exercise tutorial
+  (ex01–ex30 per-stage; ex31–ex39 end-to-end pipeline runs; ex40–ex46
+  performance and data-structure comparisons; ex47–ex55 domain views)

@@ -1,9 +1,9 @@
 # Crank Language Tutorial
 
-**Location:** `src/examples/example_crank_tutorial.hpp`  
+**Location:** `src/examples/crank/example_crank_tutorial.hpp`
 **Struct:** `crank_tutorial::CrankTutorial`
 
-Loads Crank tutorial scripts from `src/examples/resources/crank/ex*.ck`, runs the full pipeline for each, and displays
+Loads Crank tutorial scripts from `src/examples/crank/resources/ex*.ck`, runs the full pipeline for each, and displays
 results. No Crank source in the header.
 
 ## Pipeline (per script)
@@ -17,7 +17,7 @@ script fails.
 
 ## Resource Files
 
-`src/examples/resources/crank/ex*.ck` — scripts processed in sorted filename order.
+`src/examples/crank/resources/ex*.ck` — scripts processed in sorted filename order.
 
 | File                      | What it demonstrates                                          |
 |---------------------------|---------------------------------------------------------------|
@@ -41,16 +41,15 @@ script fails.
 ## Running
 
 ```bash
-./turbo_twig crank_tutorial
-./turbo_twig --filter tutorial
-./turbo_twig --filter crank
+cmake -S . -B build -DBEDROCK_BUILD_EXAMPLES=ON
+cmake --build build --target bedrock_examples
+./build/bedrock_examples crank_tutorial
 ```
 
 ## Resource Dir Resolution
 
-`TURBO_TWIG_SOURCE_DIR` compile definition (set by CMake) provides the project root. The header constructs the full path
-as `${TURBO_TWIG_SOURCE_DIR}/src/examples/resources/crank`. Build with CMake — direct compilation without CMake will
-produce a compile error.
+The example finds its adjacent `resources/` directory with `std::source_location`; it does not depend on a project-root
+compile definition and remains relocatable with its `.ck` files.
 
 ## Output
 

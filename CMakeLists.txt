@@ -56,6 +56,7 @@ endif()
 
 option(BUILD_TESTS "Build bedrock's tests (auto-disabled when used as a subdirectory)" ${BEDROCK_IS_TOP_LEVEL})
 option(BUILD_APP   "Build the application" OFF)
+option(BEDROCK_BUILD_EXAMPLES "Build Bedrock's runnable Crank and Lithe examples" OFF)
 option(BEDROCK_ENABLE_PRAVAHA_EXTERNAL_ADAPTER_TESTS
        "Build Pravaha tests requiring downstream Lithe, Vulkan, or Sutra headers" OFF)
 
@@ -512,37 +513,21 @@ SET(CATCH2_SOURCE
 )
 add_library(Catch2 STATIC ${CATCH2_SOURCE})
 
-file(GLOB APP_SOURCE
-        "${CMAKE_SOURCE_DIR}/src/examples/*.cpp"
-        "${CMAKE_SOURCE_DIR}/src/examples/*.hpp"
-)
-
-if (BUILD_EXECUTABLE AND APP_SOURCE)
-    add_executable(${PROJECT_NAME} ${APP_SOURCE})
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-            spdlog::spdlog_header_only
-            hwy
-            crc32c
-    )
-    if (TARGET lmdb)
-        target_link_libraries(${PROJECT_NAME} PRIVATE lmdb)
-    endif()
-    if (TARGET libz3)
-        target_link_libraries(${PROJECT_NAME} PRIVATE libz3)
-    elseif (TARGET z3_imported)
-        target_link_libraries(${PROJECT_NAME} PRIVATE z3_imported)
-    endif()
-    if (HAS_MLX AND TARGET mlx)
-        target_link_libraries(${PROJECT_NAME} PRIVATE mlx)
-    endif()
+if (BEDROCK_BUILD_EXAMPLES)
+    set(BEDROCK_EXAMPLE_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/examples/crank/main.cpp")
     if (HAS_METAL_CPP)
-        target_link_libraries(${PROJECT_NAME} PRIVATE
-            ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+        list(APPEND BEDROCK_EXAMPLE_SOURCES
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/examples/crank/metal_cpp_implementation.cpp")
     endif()
-    target_compile_definitions(${PROJECT_NAME} PRIVATE
-        TURBO_TWIG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-elseif (BUILD_EXECUTABLE)
-    message(STATUS "[bedrock] No application sources; executable target omitted")
+    add_executable(bedrock_examples ${BEDROCK_EXAMPLE_SOURCES})
+    target_link_libraries(bedrock_examples PRIVATE
+        bedrock::pebble
+        bedrock::crank
+        bedrock::lithe_simd
+        bedrock::medha
+        spdlog::spdlog_header_only)
+    target_compile_features(bedrock_examples PRIVATE cxx_std_23)
 endif()
 
 if (BUILD_TESTS)
