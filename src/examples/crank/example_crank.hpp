@@ -1615,8 +1615,11 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
         auto fib_crank = profiler::measure(cfg, [&]() {
             std::int64_t total = 0;
             for (std::int32_t i = 0; i < kFibBatch; ++i) {
-                const auto ret = invoke_typed<std::int32_t>(fib_desc, 39 + (i & 1));
-                total += ret.value_or(0);
+                std::int32_t value = 0;
+                if (!invoke_typed_into(fib_desc, value, 39 + (i & 1))) {
+                    return std::int64_t{-1};
+                }
+                total += value;
             }
             return total;
         });

@@ -131,6 +131,12 @@ namespace crank {
             native_only // force lithe::execution::compile + invoke
         };
 
+        struct hotness_thresholds {
+            std::uint32_t instruction_count = 24u;
+            std::uint32_t block_count = 4u;
+            std::uint32_t branch_count = 1u;
+        } hotness{};
+
         // If true, @overflow(checked) scope: trap on integer overflow.
         // Default false = wrapping two's-complement.
         bool overflow_checked = false;
@@ -486,9 +492,9 @@ namespace crank {
             if (opts.path == execute_options::execution_path::native_only) return true;
             if (opts.path == execute_options::execution_path::jit_preferred) return true;
             if (opts.path == execute_options::execution_path::interpreter_only) return false;
-            if (count_branches(phys) >= k_auto_native_branch_threshold) return true;
-            if (count_blocks(phys) >= k_auto_native_block_threshold) return true;
-            return count_instrs(phys) >= k_auto_native_instr_threshold;
+            if (count_branches(phys) >= opts.hotness.branch_count) return true;
+            if (count_blocks(phys) >= opts.hotness.block_count) return true;
+            return count_instrs(phys) >= opts.hotness.instruction_count;
         }
     } // namespace detail
 

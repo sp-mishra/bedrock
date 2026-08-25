@@ -423,15 +423,25 @@ namespace crank {
 
     template <class R, class... Args>
         requires (!std::is_void_v<R>)
-    [[nodiscard]] std::optional<R> invoke_typed(const function_descriptor& desc, const Args&... args) {
+    [[nodiscard]] bool invoke_typed_into(
+        const function_descriptor& desc, R& out, const Args&... args) noexcept {
         if (desc.typed_thunk == nullptr || desc.arity != sizeof...(Args)) {
-            return std::nullopt;
+            return false;
         }
         std::array<const void*, sizeof...(Args)> raw_args{
             static_cast<const void*>(std::addressof(args))...
         };
-        R out{};
         desc.typed_thunk(raw_args.data(), static_cast<void*>(&out));
+        return true;
+    }
+
+    template <class R, class... Args>
+        requires (!std::is_void_v<R>)
+    [[nodiscard]] std::optional<R> invoke_typed(const function_descriptor& desc, const Args&... args) {
+        R out{};
+        if (!invoke_typed_into(desc, out, args...)) {
+            return std::nullopt;
+        }
         return out;
     }
 
