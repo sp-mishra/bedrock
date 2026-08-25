@@ -152,6 +152,33 @@ struct medha::resource_traits<AccountStore> {
 };
 
 namespace crank_ex {
+    static void log_equivalent_benchmark(
+        const std::string_view title,
+        const std::string_view workload,
+        const std::string_view equivalence,
+        const profiler::ProfileResult& native,
+        const profiler::ProfileResult& trampoline) {
+        lg::info("{}\n{}", title,
+                 profiler::format_execution_comparison(
+                     {.workload = workload,
+                      .equivalence = equivalence,
+                      .baseline = profiler::execution_mechanism::native_cpp,
+                      .candidate = profiler::execution_mechanism::typed_host_trampoline},
+                     native, trampoline));
+    }
+
+    static void log_interpreter_probe(
+        const std::string_view title,
+        const std::string_view workload,
+        const profiler::ProfileResult& result,
+        const std::string_view scope) {
+        lg::info("{}\n{}", title,
+                 profiler::format_execution_probe(
+                     workload,
+                     profiler::execution_mechanism::physical_mir_interpreter,
+                     result, scope));
+    }
+
     // ────────────────────────────────────────────────────────────────────────────
     // ex01: parse hello world — minimal valid Crank program.
     // ────────────────────────────────────────────────────────────────────────────
@@ -1568,46 +1595,44 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             return ret.value_or(0.0f);
         });
 
-        auto pi_cmp = profiler::compare(pi_cpp.profile, pi_crank.profile);
-        lg::info("crank ex40 bench1 (pi 10k terms):\n"
-                 "  C++   avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs  median={:.2f} µs\n"
-                 "  {}",
-                 static_cast<double>(pi_cpp.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(pi_cpp.profile.median().count()) / 1000.0,
-                 static_cast<double>(pi_crank.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(pi_crank.profile.median().count()) / 1000.0,
-                 profiler::format_comparison(pi_cmp));
+        log_equivalent_benchmark(
+            "crank ex40 bench1 (pi, 10k terms)",
+            "Leibniz pi estimate over 10,000 terms",
+            "Both samples call host_pi_estimate(10,000); candidate crosses the typed host trampoline.",
+            pi_cpp.profile, pi_crank.profile);
 
-        // ── bench2: fibonacci(40) iterative ──────────────────────────────────────
-        cfg.label = "fib_cpp_40";
+        // ── bench2: fibonacci batch — avoid sub-microsecond timer noise ──────────
+        constexpr std::int32_t kFibBatch = 10'000;
+        cfg.label = "fib_cpp_batch";
         auto fib_cpp = profiler::measure(cfg, []() noexcept {
-            return host_fibonacci(40);
+            std::int64_t total = 0;
+            for (std::int32_t i = 0; i < kFibBatch; ++i)
+                total += host_fibonacci(39 + (i & 1));
+            return total;
         });
 
-        cfg.label = "fib_crank_40";
+        cfg.label = "fib_host_trampoline_batch";
         auto fib_crank = profiler::measure(cfg, [&]() {
-            const auto ret = invoke_typed<std::int32_t>(fib_desc, std::int32_t{40});
-            return ret.value_or(0);
+            std::int64_t total = 0;
+            for (std::int32_t i = 0; i < kFibBatch; ++i) {
+                const auto ret = invoke_typed<std::int32_t>(fib_desc, 39 + (i & 1));
+                total += ret.value_or(0);
+            }
+            return total;
         });
 
         // Sanity-check: both sides must agree on the answer.
         if (!fib_cpp.return_values.empty() && !fib_crank.return_values.empty()) {
             if (fib_cpp.return_values[0] != fib_crank.return_values[0])
-                return testfw::fail("ex40: fibonacci(40) C++ vs Crank result mismatch");
-            lg::info("crank ex40 bench2: fibonacci(40) = {} (both agree)", fib_cpp.return_values[0]);
+                return testfw::fail("ex40: fibonacci batch native vs trampoline result mismatch");
+            lg::info("crank ex40 bench2: {} mixed fibonacci calls agree", kFibBatch);
         }
 
-        auto fib_cmp = profiler::compare(fib_cpp.profile, fib_crank.profile);
-        lg::info("crank ex40 bench2 (fibonacci 40):\n"
-                 "  C++   avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs  median={:.2f} µs\n"
-                 "  {}",
-                 static_cast<double>(fib_cpp.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(fib_cpp.profile.median().count()) / 1000.0,
-                 static_cast<double>(fib_crank.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(fib_crank.profile.median().count()) / 1000.0,
-                 profiler::format_comparison(fib_cmp));
+        log_equivalent_benchmark(
+            "crank ex40 bench2 (fibonacci batch)",
+            "10,000 alternating fibonacci(39) and fibonacci(40) calls",
+            "Both samples execute identical calls; candidate crosses the typed host trampoline per call.",
+            fib_cpp.profile, fib_crank.profile);
 
         // ── bench3: sum(1..N) — HL MIR interpreter loop vs native C++ ────────────
         // Crank side: lower a structured_for loop and execute via interpreter.
@@ -1656,33 +1681,22 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             return execute_via_interpreter(hl).ok() ? 1 : 0;
         });
 
-        auto sum_cmp_exec = profiler::compare(sum_cpp.profile, sum_crank_exec.profile);
-        auto sum_cmp_full = profiler::compare(sum_cpp.profile, sum_crank_full.profile);
-
         // Gaussian sum formula sanity check for C++ path.
         const std::int64_t expected_sum = kSumN * (kSumN + 1) / 2;
         if (!sum_cpp.return_values.empty() && sum_cpp.return_values[0] != expected_sum)
             return testfw::fail("ex40: sum_cpp result incorrect");
-        lg::info("crank ex40 bench3 (sum 1..{}):\n"
-                 "  Phase split — lower={:.2f} µs (once)  instrs={}  blocks={}\n"
-                 "  C++ native        avg={:.2f} µs  median={:.2f} µs  result={}\n"
-                 "  Crank execute-only avg={:.2f} µs  median={:.2f} µs  (interpret cached phys MIR)\n"
-                 "  Crank full-phase   avg={:.2f} µs  median={:.2f} µs  (re-lower + interpret)\n"
-                 "  --- C++ vs execute-only ---\n{}\n"
-                 "  --- C++ vs full-phase ---\n{}",
-                 kSumN,
-                 static_cast<double>(sum_lp.lower_ns) / 1000.0,
-                 sum_phys_stats.instr_count,
-                 sum_phys_stats.block_count,
-                 static_cast<double>(sum_cpp.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(sum_cpp.profile.median().count()) / 1000.0,
-                 expected_sum,
-                 static_cast<double>(sum_crank_exec.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(sum_crank_exec.profile.median().count()) / 1000.0,
-                 static_cast<double>(sum_crank_full.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(sum_crank_full.profile.median().count()) / 1000.0,
-                 profiler::format_comparison(sum_cmp_exec),
-                 profiler::format_comparison(sum_cmp_full));
+        lg::info("crank ex40 bench3: native sum(1..{}) result={} (not compared to the probes)\n"
+                 "  physical-MIR lowering once: {:.2f} us; instrs={}; blocks={}",
+                 kSumN, expected_sum, static_cast<double>(sum_lp.lower_ns) / 1000.0,
+                 sum_phys_stats.instr_count, sum_phys_stats.block_count);
+        log_interpreter_probe(
+            "crank ex40 bench3 (cached physical MIR)", "structured loop dispatch",
+            sum_crank_exec.profile,
+            "The physical MIR contains loop control only; it does not compute the native Gaussian sum.");
+        log_interpreter_probe(
+            "crank ex40 bench3 (full lowering plus interpretation)", "structured loop dispatch",
+            sum_crank_full.profile,
+            "The workload is loop control only; it is not an equivalent native-sum comparison.");
 
         lg::info("crank ex40 (C++ vs Crank benchmarks): all comparisons complete");
         return {};
@@ -1818,18 +1832,14 @@ fn newton_sqrt_approx(x: Float32, iters: Int32) -> Float32 {
             return execute_physical(*harm_lp.phys).ok() ? 1 : 0;
         });
 
-        auto cmp = profiler::compare(cpp_result.profile, crank_result.profile);
-        lg::info("crank ex41 (harmonic 100k):\n"
-                 "  Phase split — lower={:.2f} µs (once)  instrs={}  blocks={}\n"
-                 "  C++                avg={:.2f} µs\n"
-                 "  Crank execute-only avg={:.2f} µs (interpret cached phys MIR)\n"
-                 "  {}",
+        lg::info("crank ex41 (harmonic 100k): native result is retained for correctness; "
+                 "physical-MIR lowering once={:.2f} us; instrs={}; blocks={}",
                  static_cast<double>(harm_lp.lower_ns) / 1000.0,
-                 harm_phys_stats.instr_count,
-                 harm_phys_stats.block_count,
-                 static_cast<double>(cpp_result.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(crank_result.profile.average_duration.count()) / 1000.0,
-                 profiler::format_comparison(cmp));
+                 harm_phys_stats.instr_count, harm_phys_stats.block_count);
+        log_interpreter_probe(
+            "crank ex41 (cached physical MIR)", "structured loop dispatch",
+            crank_result.profile,
+            "The physical MIR omits harmonic accumulation, so it is not compared with host_harmonic_sum.");
 
         // ── parallel plan extraction on @simd-eligible dot loop ──────────────────
         lower_input dot_inp;
@@ -2069,15 +2079,11 @@ fn mod_pow(base: Int64, exp: Int64, mod: Int64) -> Int64 {
             return std::any_cast<std::int32_t>(ret);
         });
 
-        auto cmp = profiler::compare(sieve_cpp.profile, sieve_crank.profile);
-        lg::info("crank ex42 (sieve 100k):\n"
-                 "  C++   avg={:.2f} µs  result={}\n"
-                 "  Crank avg={:.2f} µs\n"
-                 "  {}",
-                 static_cast<double>(sieve_cpp.profile.average_duration.count()) / 1000.0,
-                 (!sieve_cpp.return_values.empty() ? sieve_cpp.return_values[0] : 0),
-                 static_cast<double>(sieve_crank.profile.average_duration.count()) / 1000.0,
-                 profiler::format_comparison(cmp));
+        log_equivalent_benchmark(
+            "crank ex42 (sieve, 100k)",
+            "Count primes at or below 100,000",
+            "Both samples call host_sieve_count(100,000); candidate crosses the host trampoline.",
+            sieve_cpp.profile, sieve_crank.profile);
 
         lg::info("crank ex42 (number theory): sieve, Miller-Rabin, GCD, LCM all verified");
         return {};
@@ -2262,19 +2268,11 @@ fn variance_approx(n: Int32) -> Float64 {
             return ret.value_or(0.0);
         });
 
-        auto cmp = profiler::compare(cpp_r.profile, crank_r.profile);
-        lg::info("crank ex43 (welford variance 100k):\n"
-                 "  C++   avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs  median={:.2f} µs\n"
-                 "  stddev_cpp={:.2f} µs  CV={:.3f}\n"
-                 "  {}",
-                 static_cast<double>(cpp_r.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(cpp_r.profile.median().count()) / 1000.0,
-                 static_cast<double>(crank_r.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(crank_r.profile.median().count()) / 1000.0,
-                 static_cast<double>(cpp_r.profile.standard_deviation().count()) / 1000.0,
-                 cpp_r.profile.coefficient_of_variation(),
-                 profiler::format_comparison(cmp));
+        log_equivalent_benchmark(
+            "crank ex43 (Welford variance, 100k)",
+            "Single-pass Welford variance over the same 100,000 values",
+            "Both samples call host_welford_variance over the same vector; candidate crosses the host trampoline.",
+            cpp_r.profile, crank_r.profile);
 
         // ── Benchmark: Pearson correlation C++ vs Crank trampoline ───────────────
         cfg.label = "pearson_cpp_100k";
@@ -2289,14 +2287,11 @@ fn variance_approx(n: Int32) -> Float64 {
             return ret.value_or(0.0);
         });
 
-        auto pearson_cmp = profiler::compare(pearson_cpp.profile, pearson_crank.profile);
-        lg::info("crank ex43 (pearson corr 100k):\n"
-                 "  C++   avg={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs\n"
-                 "  {}",
-                 static_cast<double>(pearson_cpp.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(pearson_crank.profile.average_duration.count()) / 1000.0,
-                 profiler::format_comparison(pearson_cmp));
+        log_equivalent_benchmark(
+            "crank ex43 (Pearson correlation, 100k)",
+            "Pearson correlation over the same paired vectors",
+            "Both samples call host_pearson_corr over the same vectors; candidate crosses the host trampoline.",
+            pearson_cpp.profile, pearson_crank.profile);
 
         lg::info("crank ex43 (statistical computation): variance, correlation, regression verified; "
                  "parallel mean loop={}", mean_hl.stats.parallel_loop_count);
@@ -2465,28 +2460,19 @@ fn matmul_trace(n: Int32) -> Int64 {
             return execute_physical(*lp.phys).ok() ? 1 : 0;
         });
 
-        auto cmp_tramp = profiler::compare(cpp_r.profile, crank_r.profile);
-        auto cmp_exec = profiler::compare(cpp_r.profile, exec_r.profile);
         auto phys_stats = execute_physical(*lp.phys).stats;
 
-        lg::info("crank ex44 (nested loops N={}):\n"
-                 "  Phase split — lower={:.2f} µs (once)  instrs={}  blocks={}\n"
-                 "  C++ native        avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank trampoline  avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank execute-only avg={:.2f} µs  (interpret cached phys MIR)\n"
-                 "  --- C++ vs trampoline ---\n{}\n"
-                 "  --- C++ vs execute-only ---\n{}",
-                 kN,
+        log_equivalent_benchmark(
+            std::format("crank ex44 (nested sum, N={})", kN),
+            "Nested integer accumulation",
+            "Both samples call host_nested_sum(N); candidate crosses the typed host trampoline.",
+            cpp_r.profile, crank_r.profile);
+        lg::info("crank ex44 physical-MIR lowering once={:.2f} us; instrs={}; blocks={}",
                  static_cast<double>(lp.lower_ns) / 1000.0,
-                 phys_stats.instr_count,
-                 phys_stats.block_count,
-                 static_cast<double>(cpp_r.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(cpp_r.profile.median().count()) / 1000.0,
-                 static_cast<double>(crank_r.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(crank_r.profile.median().count()) / 1000.0,
-                 static_cast<double>(exec_r.profile.average_duration.count()) / 1000.0,
-                 profiler::format_comparison(cmp_tramp),
-                 profiler::format_comparison(cmp_exec));
+                 phys_stats.instr_count, phys_stats.block_count);
+        log_interpreter_probe(
+            "crank ex44 (cached physical MIR)", "nested structured-loop dispatch", exec_r.profile,
+            "The physical MIR models loop control only; it does not perform host_nested_sum accumulation.");
 
         // ── Benchmark: matmul_trace(64) C++ vs trampoline ────────────────────────
         cfg.iterations = 20;
@@ -2501,16 +2487,11 @@ fn matmul_trace(n: Int32) -> Int64 {
             return ret.value_or(0LL);
         });
 
-        auto mm_cmp = profiler::compare(mm_cpp.profile, mm_crank.profile);
-        lg::info("crank ex44 (matmul trace N=64):\n"
-                 "  C++   avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs  median={:.2f} µs\n"
-                 "  {}",
-                 static_cast<double>(mm_cpp.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(mm_cpp.profile.median().count()) / 1000.0,
-                 static_cast<double>(mm_crank.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(mm_crank.profile.median().count()) / 1000.0,
-                 profiler::format_comparison(mm_cmp));
+        log_equivalent_benchmark(
+            "crank ex44 (matrix trace, N=64)",
+            "Matrix multiplication trace for the same 64 by 64 problem",
+            "Both samples call host_matmul_trace(64); candidate crosses the host trampoline.",
+            mm_cpp.profile, mm_crank.profile);
 
         lg::info("crank ex44 (nested loops): nested_sum, matmul_trace, triangular_sum verified + benchmarked");
         return {};
@@ -2663,27 +2644,17 @@ fn count_even(n: Int32) -> Int32 {
             return execute_physical(*bs_lp.phys).ok() ? 1 : 0;
         });
 
-        auto cmp_bs_tramp = profiler::compare(cpp_bs.profile, crank_bs.profile);
-        auto cmp_bs_exec = profiler::compare(cpp_bs.profile, exec_bs.profile);
-
-        lg::info("crank ex45 (vector build+sum N={}):\n"
-                 "  Phase split — lower={:.2f} µs (once)  instrs={}  blocks={}\n"
-                 "  C++ native        avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank trampoline  avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank execute-only avg={:.2f} µs  (interpret cached phys MIR)\n"
-                 "  --- C++ vs trampoline ---\n{}\n"
-                 "  --- C++ vs execute-only ---\n{}",
-                 kVecN,
+        log_equivalent_benchmark(
+            std::format("crank ex45 (vector build and sum, N={})", kVecN),
+            "Allocate, populate, and sum a vector of N integers",
+            "Both samples call host_vec_build_sum(N); candidate crosses the typed host trampoline.",
+            cpp_bs.profile, crank_bs.profile);
+        lg::info("crank ex45 physical-MIR lowering once={:.2f} us; instrs={}; blocks={}",
                  static_cast<double>(bs_lp.lower_ns) / 1000.0,
-                 bs_phys_stats.instr_count,
-                 bs_phys_stats.block_count,
-                 static_cast<double>(cpp_bs.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(cpp_bs.profile.median().count()) / 1000.0,
-                 static_cast<double>(crank_bs.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(crank_bs.profile.median().count()) / 1000.0,
-                 static_cast<double>(exec_bs.profile.average_duration.count()) / 1000.0,
-                 profiler::format_comparison(cmp_bs_tramp),
-                 profiler::format_comparison(cmp_bs_exec));
+                 bs_phys_stats.instr_count, bs_phys_stats.block_count);
+        log_interpreter_probe(
+            "crank ex45 (cached physical MIR)", "structured loop dispatch", exec_bs.profile,
+            "The physical MIR does not allocate, populate, or sum the native vector workload.");
 
         // ── Benchmark: stride_sum (stride=4) ─────────────────────────────────────
         cfg.iterations = 50;
@@ -2700,16 +2671,11 @@ fn count_even(n: Int32) -> Int32 {
             return ret.value_or(0LL);
         });
 
-        auto cmp_ss = profiler::compare(cpp_ss.profile, crank_ss.profile);
-        lg::info("crank ex45 (vector stride_sum stride=4):\n"
-                 "  C++   avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs  median={:.2f} µs\n"
-                 "  {}",
-                 static_cast<double>(cpp_ss.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(cpp_ss.profile.median().count()) / 1000.0,
-                 static_cast<double>(crank_ss.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(crank_ss.profile.median().count()) / 1000.0,
-                 profiler::format_comparison(cmp_ss));
+        log_equivalent_benchmark(
+            "crank ex45 (vector stride sum, stride=4)",
+            "Build and stride-sum the same one-million-element vector",
+            "Both samples call host_vec_stride_sum(N, 4); candidate crosses the host trampoline.",
+            cpp_ss.profile, crank_ss.profile);
 
         lg::info("crank ex45 (vector operations): build_sum, stride_sum, sorted_search verified + benchmarked");
         return {};
@@ -2884,17 +2850,11 @@ fn count_above(n: Int32, threshold: Int64) -> Int32 {
             return ret.value_or(0LL);
         });
 
-        auto cmp_is = profiler::compare(cpp_is.profile, crank_is.profile);
-        lg::info("crank ex46 (map insert+sum N={}):\n"
-                 "  C++   avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs  median={:.2f} µs\n"
-                 "  {}",
-                 kMapN,
-                 static_cast<double>(cpp_is.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(cpp_is.profile.median().count()) / 1000.0,
-                 static_cast<double>(crank_is.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(crank_is.profile.median().count()) / 1000.0,
-                 profiler::format_comparison(cmp_is));
+        log_equivalent_benchmark(
+            std::format("crank ex46 (map insert and sum, N={})", kMapN),
+            "Reserve, insert, and sum the same unordered-map workload",
+            "Both samples call host_map_insert_sum(N); candidate crosses the host trampoline.",
+            cpp_is.profile, crank_is.profile);
 
         // ── Benchmark: lookup_hits ────────────────────────────────────────────────
         cfg.label = "map_lookup_cpp_100k_500k";
@@ -2909,16 +2869,11 @@ fn count_above(n: Int32, threshold: Int64) -> Int32 {
             return ret.value_or(0);
         });
 
-        auto cmp_lh = profiler::compare(cpp_lh.profile, crank_lh.profile);
-        lg::info("crank ex46 (map lookup 500k queries):\n"
-                 "  C++   avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs  median={:.2f} µs\n"
-                 "  {}",
-                 static_cast<double>(cpp_lh.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(cpp_lh.profile.median().count()) / 1000.0,
-                 static_cast<double>(crank_lh.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(crank_lh.profile.median().count()) / 1000.0,
-                 profiler::format_comparison(cmp_lh));
+        log_equivalent_benchmark(
+            "crank ex46 (map lookup, 500k queries)",
+            "Lookup the same 500,000 keys in the same 100,000-entry map",
+            "Both samples call host_map_lookup_hits; candidate crosses the host trampoline.",
+            cpp_lh.profile, crank_lh.profile);
 
         // ── Benchmark: mixed_workload ─────────────────────────────────────────────
         cfg.label = "map_mixed_cpp_100k";
@@ -2933,17 +2888,11 @@ fn count_above(n: Int32, threshold: Int64) -> Int32 {
             return ret.value_or(0);
         });
 
-        auto cmp_mw = profiler::compare(cpp_mw.profile, crank_mw.profile);
-        lg::info("crank ex46 (map mixed workload 50%% hit N={}):\n"
-                 "  C++   avg={:.2f} µs  median={:.2f} µs\n"
-                 "  Crank avg={:.2f} µs  median={:.2f} µs\n"
-                 "  {}",
-                 kMapN,
-                 static_cast<double>(cpp_mw.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(cpp_mw.profile.median().count()) / 1000.0,
-                 static_cast<double>(crank_mw.profile.average_duration.count()) / 1000.0,
-                 static_cast<double>(crank_mw.profile.median().count()) / 1000.0,
-                 profiler::format_comparison(cmp_mw));
+        log_equivalent_benchmark(
+            std::format("crank ex46 (mixed map workload, N={})", kMapN),
+            "The same insert, lookup, and hit-rate workload",
+            "Both samples call host_map_mixed_workload(N); candidate crosses the host trampoline.",
+            cpp_mw.profile, crank_mw.profile);
 
         lg::info("crank ex46 (map operations): insert_sum, lookup_hits, mixed_workload, "
             "count_above verified + benchmarked (C++ vs Crank trampoline)");
