@@ -574,11 +574,13 @@ namespace crank {
     }
 
     // ============================================================================
-    // execute_via_interpreter — HL MIR → physical MIR → interpreter (one-shot)
+    // execute_via_interpreter — HL MIR → physical MIR → selected local backend
     //
     // Convenience wrapper: lower_to_physical (phase 1) then execute_physical
-    // (phase 2), merging both phases' timing into one crank_execute_result. Kept
-    // signature-stable for existing callers.
+    // (phase 2), merging both phases' timing into one crank_execute_result. The
+    // default auto_select policy retains interpreter behavior for tiny fragments
+    // but chooses native JIT for hot or CFG-heavy MIR. interpreter_only remains
+    // available for verification and explicit fallback probes.
     // ============================================================================
 
     [[nodiscard]] inline crank_execute_result
@@ -594,19 +596,19 @@ namespace crank {
             return res;
         }
 
-        // Keep this entry-point strict: it always runs the interpreter regardless of
-        // execute_options::path, so existing callers remain semantically stable.
-        auto interp_res = detail::run_interpreter(*lp.phys, args, opts);
+        auto selected_res = execute_physical(*lp.phys, args, opts);
 
-        res.return_value = interp_res.return_value;
-        res.overflow_trapped = interp_res.overflow_trapped;
-        res.stats.execute_ns = interp_res.stats.execute_ns;
-        res.stats.instr_count = interp_res.stats.instr_count;
-        res.stats.branch_count = interp_res.stats.branch_count;
-        res.stats.block_count = interp_res.stats.block_count;
-        for (auto& d : interp_res.diagnostics)
+        res.return_value = selected_res.return_value;
+        res.overflow_trapped = selected_res.overflow_trapped;
+        res.fallback_fired = selected_res.fallback_fired;
+        res.stats.execute_ns = selected_res.stats.execute_ns;
+        res.stats.instr_count = selected_res.stats.instr_count;
+        res.stats.branch_count = selected_res.stats.branch_count;
+        res.stats.block_count = selected_res.stats.block_count;
+        res.stats.fallback_used = selected_res.stats.fallback_used;
+        for (auto& d : selected_res.diagnostics)
             res.diagnostics.push_back(std::move(d));
-        for (auto& n : interp_res.notes)
+        for (auto& n : selected_res.notes)
             res.notes.push_back(std::move(n));
 
         return res;

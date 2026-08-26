@@ -1614,8 +1614,8 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
         // ── shared profiler config ───────────────────────────────────────────────
         profiler::ProfileConfig cfg;
         cfg.iterations = 200;
-        cfg.warmup_iterations = 20;
-        cfg.trim_outliers_percentage = 5.0;
+        cfg.warmup_iterations = 40;
+        cfg.trim_outliers_percentage = 10.0;
         cfg.output_unit = profiler::TimeUnit::Microseconds;
 
         // ── register host functions ──────────────────────────────────────────────
@@ -1734,6 +1734,14 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             && sum_jit_entry != nullptr;
         const auto sum_phys_stats = sum_jit_prepared.preparation_stats();
 
+        // The intelligent front door must select the native path for this
+        // CFG-heavy loop when the prepared native artifact is available.
+        const auto sum_auto = execute_via_interpreter(sum_hl);
+        if (!sum_auto.return_value || *sum_auto.return_value != expected_sum)
+            return testfw::fail("ex40: automatic sum execution result mismatch");
+        if (sum_jit_available && sum_auto.fallback_fired)
+            return testfw::fail("ex40: hot sum loop unexpectedly fell back from native JIT");
+
         if (sum_jit_available) {
             cfg.label = "sum_crank_jit_100k";
             auto sum_crank_jit = profiler::measure(cfg, [sum_jit_entry]() {
@@ -1760,13 +1768,15 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             return run.return_value.value_or(-1);
         });
 
-        // Crank full-phase: re-lower + execute each iteration (fresh HL result so
-        // the physical-MIR cache is cold), isolating lowering + interpret cost.
+        // Crank full-phase: re-lower + explicitly interpret each iteration (fresh
+        // HL result so the physical-MIR cache is cold), isolating lowering +
+        // interpretation cost from automatic native selection.
         cfg.label = "sum_crank_full_100k";
         auto sum_crank_full = profiler::measure(cfg, [&]() {
             const auto hl = lower_to_hl(make_sum_input());
             if (!hl.ok()) return std::int64_t{-1};
-            const auto run = execute_via_interpreter(hl);
+            const auto run = execute_via_interpreter(
+                hl, {}, {.path = execute_options::execution_path::interpreter_only});
             return run.return_value.value_or(-1);
         });
 
@@ -1780,8 +1790,10 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             || sum_crank_full.return_values[0] != expected_sum)
             return testfw::fail("ex40: physical MIR sum result mismatch");
         lg::info("crank ex40 bench3: sum(1..{}) result={} across native and value-carrying MIR\n"
-                 "  physical-MIR lowering once: {:.2f} us; instrs={}; blocks={}; Nadi phase events={}",
-                 kSumN, expected_sum, static_cast<double>(sum_lp.lower_ns) / 1000.0,
+                 "  automatic hot-loop backend: {}; physical-MIR lowering once: {:.2f} us; instrs={}; blocks={}; Nadi phase events={}",
+                 kSumN, expected_sum,
+                 sum_auto.fallback_fired ? "interpreter fallback" : "native JIT",
+                 static_cast<double>(sum_lp.lower_ns) / 1000.0,
                  sum_phys_stats.instr_count, sum_phys_stats.block_count,
                  phase_sink::instance().size());
         log_equivalent_benchmark(

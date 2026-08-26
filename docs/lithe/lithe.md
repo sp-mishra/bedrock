@@ -1559,7 +1559,8 @@ Entry points (`include/lithe/lithe_execution/compile.hpp`, namespace `lithe::exe
   mutate trace state, or branch for telemetry.
 - **crank frontend entry:** `execute_planned` (`languages/crank/plan.hpp` + `execute.hpp`); crank's planner (
   `construct_plan`) supplies intent (`execution_hint`) and force policy; lithe emits/caches (L-1 §4.5). Callers that
-  want the explicit interpreter path use `execute_via_interpreter` / `execute_physical`.
+  want the explicit interpreter path set `execute_options::path = interpreter_only` on `execute_via_interpreter` or
+  `execute_physical`.
 
 Crank execution-path note (`include/languages/crank/execute.hpp`):
 
@@ -1568,7 +1569,9 @@ Crank execution-path note (`include/languages/crank/execute.hpp`):
 - Default `auto_select` prefers native codegen for CFG-heavy or larger physical MIR and keeps interpreter for small
   straight-line MIR.
 - `jit_preferred` requests native first while preserving a safe interpreter fallback when native is unavailable.
-- `execute_via_interpreter` remains strictly interpreter-only for callers that need deterministic fallback behavior.
+- `execute_via_interpreter` is the intelligent local-execution front door: with the default `auto_select` it follows
+  the same native-versus-interpreter policy as `execute_physical`; callers that require the interpreter set
+  `interpreter_only` explicitly.
 - `execute_physical_native` uses a digest-keyed in-process artifact cache so repeated calls of equivalent physical MIR
   reuse the compiled native artifact.
 - `prepare_physical_native` returns Crank's owning `prepared_native_execution`; its `native_entry()` is the zero-extra-
