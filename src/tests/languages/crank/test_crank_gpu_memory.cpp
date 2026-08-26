@@ -13,6 +13,11 @@
 
 #include "languages/crank/gpu_memory.hpp"
 #include "languages/crank/gpu_execution_graph.hpp"
+#include "languages/crank/gpu_metal_execution.hpp"
+#include "languages/crank/gpu_pipeline.hpp"
+
+#include <concepts>
+#include <utility>
 
 using namespace crank;
 
@@ -204,4 +209,97 @@ TEST_CASE (
     REQUIRE(visited.size() == 2);
     REQUIRE(visited[0] == producer);
     REQUIRE(visited[1] == consumer);
+}
+
+TEST_CASE (
+
+"GPU execution graph derives device-chain eligibility from its Pebble dependencies"
+,
+"[crank][gpu_memory][graph]"
+)
+ {
+    const auto make_region = [] {
+        gpu_region region;
+        auto input = buf(address_space::device, buffer_access::read, residency_state::host_current);
+        input.byte_size = 64 * 1024;
+        auto output = buf(address_space::device, buffer_access::write, residency_state::invalid);
+        output.byte_size = 64 * 1024;
+        region.buffers = {input, output};
+        return region;
+    };
+
+    gpu_execution_graph graph;
+    const auto producer = graph.add_region(make_region());
+    const auto consumer = graph.add_region(make_region());
+    REQUIRE(graph.add_device_dependency(producer, consumer));
+
+    const auto schedule = graph.schedule({}, true);
+    REQUIRE(schedule.has_value());
+    REQUIRE(schedule->items[0].decision.use_device);
+    REQUIRE(schedule->items[0].decision.retain_outputs);
+    REQUIRE(schedule->items[1].decision.use_device);
+}
+
+TEST_CASE (
+
+"unavailable device leaves the transfer plan empty"
+,
+"[crank][gpu_memory][residency]"
+)
+ {
+    gpu_region region;
+    auto input = buf(address_space::device, buffer_access::read, residency_state::host_current);
+    input.byte_size = 64 * 1024;
+    region.buffers = {input};
+    region.compatible_device_chain_length = 2;
+
+    const auto transfers = plan_transfers(region, {}, false);
+    REQUIRE(transfers.empty());
+}
+
+TEST_CASE (
+
+"Metal graph bindings express host and device dataflow without owning user memory"
+,
+"[crank][gpu_memory][metal]"
+)
+ {
+    const std::array values{1.0f, 2.0f};
+    const auto host_input = gpu_metal_input_binding::from_host(values);
+    REQUIRE(host_input.host.data() == values.data());
+    REQUIRE(host_input.host.size() == values.size());
+    REQUIRE_FALSE(host_input.producer.has_value());
+
+    const litegraph::NodeId producer{7};
+    const auto device_input = gpu_metal_input_binding::from_region(producer);
+    REQUIRE(device_input.host.empty());
+    REQUIRE(device_input.producer == producer);
+}
+
+TEST_CASE (
+
+"Metal graph executor retains Pebble's zero-cost default phase observer"
+,
+"[crank][gpu_memory][metal][telemetry]"
+)
+ {
+    using executor = gpu_metal_executor;
+    using observed_result = decltype(std::declval<const executor>().execute_observed(
+        std::declval<const gpu_execution_graph&>(),
+        std::declval<std::span<const gpu_metal_graph_binding>>()));
+    STATIC_REQUIRE(std::same_as<observed_result,
+                                std::expected<gpu_metal_execution_summary, gpu_dispatch_result>>);
+}
+
+TEST_CASE (
+
+"Crank GPU pipeline is an opt-in typed tensor bridge"
+,
+"[crank][gpu_memory][metal][pipeline]"
+)
+ {
+    crank_gpu_pipeline pipeline;
+    REQUIRE(pipeline.empty());
+    const auto invalid = pipeline.add_binary_region({});
+    REQUIRE_FALSE(invalid.has_value());
 }

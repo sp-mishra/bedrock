@@ -185,11 +185,20 @@ namespace crank {
 
     [[nodiscard]] inline transfer_plan plan_transfers(
         const gpu_region& region,
-        const lithe::exec::auto_execution_policy& policy = {}) {
+        const lithe::exec::auto_execution_policy& policy = {},
+        const bool device_available = true) {
         transfer_plan plan;
         std::uint64_t next_event = 1;
         std::vector<std::uint64_t> upload_events;
-        const auto decision = decide_device_execution(region, policy, /*device_available=*/true);
+        const auto decision = decide_device_execution(region, policy, device_available);
+        // This API describes the copies a device dispatch would require. Its
+        // default callers use it for transfer analysis independently of the
+        // automatic profitability threshold; only an explicitly unavailable or
+        // forbidden device makes the plan empty. gpu_execution_graph performs
+        // the separate decision.use_device gate before scheduling transfers.
+        if (!device_available
+            || policy.device_residency == lithe::exec::device_residency_policy::host_only)
+            return plan;
 
         // Pass 1: uploads for device-read inputs that are host-current.
         for (const auto& b : region.buffers) {

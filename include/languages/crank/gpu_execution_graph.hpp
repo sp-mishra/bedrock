@@ -10,6 +10,7 @@
 
 #include "containers/graph/LiteGraph.hpp"
 
+#include <algorithm>
 #include <concepts>
 #include <expected>
 #include <functional>
@@ -89,6 +90,19 @@ namespace crank {
             return graph_.add_edge(producer, consumer, 0u).is_valid();
         }
 
+        [[nodiscard]] bool has_device_dependency(const litegraph::NodeId producer,
+                                                 const litegraph::NodeId consumer) const {
+            if (!graph_.valid_node(producer) || !graph_.valid_node(consumer)) return false;
+            bool found = false;
+            graph_.for_each_out_edge(producer, [&](const litegraph::EdgeId,
+                                                    const litegraph::NodeId,
+                                                    const litegraph::NodeId target,
+                                                    const std::uint32_t&) {
+                found = found || target == consumer;
+            });
+            return found;
+        }
+
         [[nodiscard]] std::expected<gpu_execution_schedule, std::string>
         schedule(const lithe::exec::auto_execution_policy& policy,
                  const bool device_available) const {
@@ -116,6 +130,11 @@ namespace crank {
                     regions[index].output_consumed_on_device = true;
                     regions[index].host_observes_output = false;
                 }
+                // The graph itself proves a compatible multi-region chain;
+                // callers need not pre-compute this local scheduling fact.
+                if (has_device_consumer || indegree[id.value] != 0)
+                    regions[index].compatible_device_chain_length = std::max(
+                        regions[index].compatible_device_chain_length, 2u);
             }
 
             gpu_execution_schedule result;
@@ -125,7 +144,9 @@ namespace crank {
                 auto& region = regions[index];
                 const auto decision = decide_device_execution(region, policy, device_available);
                 if (decision.retain_outputs) ++result.retained_outputs;
-                auto transfers = plan_transfers(region, policy);
+                auto transfers = decision.use_device
+                    ? plan_transfers(region, policy, device_available)
+                    : transfer_plan{};
 
                 graph_.for_each_out_edge(id, [&](const litegraph::EdgeId,
                                                   const litegraph::NodeId,

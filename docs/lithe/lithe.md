@@ -60,6 +60,24 @@ bindings and any asynchronous submission tokens. `fuse_parallel_hl_regions`
 applies Lithe's existing structural fusion pass before device-plan extraction,
 subject to the same policy.
 
+For Metal, `gpu_metal_executor` is the typed opt-in data-plane adapter. It
+accepts `gpu_metal_graph_binding` records, uploads each distinct graph input
+once, keeps producer tensors device-resident for declared dependencies, retains
+all completion tokens until the graph completes, and copies only explicitly
+host-observed outputs. Its graph shape still uses Pebble LiteGraph; its tensor
+and submission storage is intentionally local and ephemeral.
+
+No GPU-specific facility is added to Pebble's common language layer. The
+executor instead uses its existing `lang::telemetry::phase_observer` seam via
+`execute_observed`; the default observer is empty, while a language can opt
+into NADI metrics and feedback through Pebble's policy types.
+
+Crank's opt-in `gpu_pipeline.hpp` is the frontend bridge: it borrows typed f32
+host tensor views, records region dependencies in the Pebble graph, runs
+HL-MIR fusion before Lithe device-plan extraction, and invokes the Metal
+executor. Crank retains host-buffer ownership; Lithe retains only non-owning
+plans; Metal tensors and submissions are temporary execution state.
+
 Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
 added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.
 
