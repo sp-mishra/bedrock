@@ -50,6 +50,16 @@ the next host-observation boundary. Users may select `prefer_device`,
 bytes, memory budget, fusion, and asynchronous submission independently of
 portable execution.
 
+Crank represents such chains with `gpu_execution_graph`, backed directly by
+Pebble's `litegraph::Graph`. It topologically schedules device dependencies,
+marks internal outputs as device-consumed, and derives residency, transfer, and
+fusion-candidate decisions without duplicating a graph container in Lithe.
+`execute` accepts a statically-bound resolver returning
+`std::expected<void, std::string>`; the resolver owns the typed kernel/buffer
+bindings and any asynchronous submission tokens. `fuse_parallel_hl_regions`
+applies Lithe's existing structural fusion pass before device-plan extraction,
+subject to the same policy.
+
 Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
 added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.
 
