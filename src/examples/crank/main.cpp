@@ -1,6 +1,6 @@
 // Bedrock Crank examples entry point.
 //
-// Usage: bedrock_examples [--list | --all | --filter <tag> | <name>]
+// Usage: bedrock_examples [--list | --all | --filter <tag> | --benchmark-gpu | <name>]
 
 #include "example_crank.hpp"
 #include "example_crank_tutorial.hpp"
@@ -26,6 +26,10 @@ int main(const int argc, char* argv[]) {
 
     if (command == "--filter") {
         return argc == 3 ? examples::run_by_tag(argv[2]) : 1;
+    }
+
+    if (command == "--benchmark-gpu") {
+        return crank_ex::ex36_e2e_gpu_elementwise(/*benchmark_backends=*/true) ? 0 : 2;
     }
 
     return examples::run_by_name(command);

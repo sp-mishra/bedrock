@@ -160,12 +160,14 @@ namespace crank_ex {
         const profiler::ProfileResult& native,
         const profiler::ProfileResult& candidate_result,
         const profiler::execution_mechanism candidate =
-            profiler::execution_mechanism::typed_host_trampoline) {
+            profiler::execution_mechanism::typed_host_trampoline,
+        const profiler::execution_mechanism baseline =
+            profiler::execution_mechanism::native_cpp) {
         lg::info("{}\n{}", title,
                  profiler::format_execution_comparison(
                      {.workload = workload,
                       .equivalence = equivalence,
-                      .baseline = profiler::execution_mechanism::native_cpp,
+                      .baseline = baseline,
                       .candidate = candidate},
                      native, candidate_result));
     }
@@ -1267,7 +1269,7 @@ fn scale(xs: []Float32) -> []Float32 {
     // ────────────────────────────────────────────────────────────────────────────
     // ex36: GPU elementwise — shared HL-MIR plan → native Metal or Vulkan/MoltenVK.
     // ────────────────────────────────────────────────────────────────────────────
-    static testfw::Result ex36_e2e_gpu_elementwise() {
+    static testfw::Result ex36_e2e_gpu_elementwise(const bool benchmark_backends = false) {
         using namespace crank;
 
         constexpr std::string_view source = R"(package demo
@@ -1430,6 +1432,49 @@ fn add_vec(xs: []Float32) -> []Float32 {
         if (!dispatched) {
             lithe::codegen::backends::simd_kernels::add(lhs, rhs, out);
             if (out[0] != 3.0f) return testfw::fail("ex36: fallback add mismatch");
+        }
+
+        // This comparison is deliberately opt-in: it measures synchronous
+        // end-to-end add dispatches (host inputs and host output included) on
+        // the same f32 buffers. It does not alter automatic Metal-first routing.
+        if (benchmark_backends) {
+#if defined(LITHE_VULKAN_BACKEND_AVAILABLE) && LITHE_VULKAN_BACKEND_AVAILABLE
+            if (!gpu_backend::metal_available() || !gpu_backend::vulkan_available()) {
+                lg::info("crank GPU backend benchmark: skipped (Metal={}, Vulkan/MoltenVK={})",
+                         gpu_backend::metal_available(), gpu_backend::vulkan_available());
+            }
+            else {
+                std::vector<float> metal_output(n);
+                std::vector<float> vulkan_output(n);
+                bool metal_failed = false;
+                bool vulkan_failed = false;
+                const profiler::ProfileConfig config{
+                    .iterations = 20,
+                    .warmup_iterations = 3,
+                    .label = "crank_gpu_add_4096",
+                };
+                const auto metal_profile = profiler::measure(config, [&] {
+                    metal_failed = metal_failed || !gpu.dispatch_metal(plan, metal_output, lhs, rhs).ok();
+                });
+                const auto vulkan_profile = profiler::measure(config, [&] {
+                    vulkan_failed = vulkan_failed || !gpu.dispatch_vulkan(plan, vulkan_output, lhs, rhs).ok();
+                });
+                if (metal_failed || vulkan_failed)
+                    return testfw::fail("ex36: GPU backend benchmark dispatch failed");
+                if (metal_output.front() != 3.0f || vulkan_output.front() != 3.0f)
+                    return testfw::fail("ex36: GPU backend benchmark result mismatch");
+                log_equivalent_benchmark(
+                    "crank GPU backend comparison (f32 add, 4,096 elements)",
+                    "Synchronous elementwise f32 addition over 4,096 elements",
+                    "Both samples use the same HL-MIR plan, host inputs, and host output; "
+                    "pipeline caching remains enabled for each provider.",
+                    metal_profile, vulkan_profile,
+                    profiler::execution_mechanism::vulkan,
+                    profiler::execution_mechanism::metal);
+            }
+#else
+            lg::info("crank GPU backend benchmark: skipped (Vulkan/MoltenVK was not compiled)");
+#endif
         }
 
         const auto provider_name = [](const gpu_provider provider) constexpr -> std::string_view {

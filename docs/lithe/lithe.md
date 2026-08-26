@@ -89,8 +89,26 @@ first and invokes a statically-bound scalar/SIMD fallback only before GPU
 submission when the configured policy permits it. Scalar-only Crank users do
 not include this header or pay for the Metal path.
 
-Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
-added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.
+When the prebuilt MoltenVK package is present, `bedrock::lithe_vulkan` exposes
+the same Crank graph bindings through the existing Pravaha Vulkan staging data
+plane and Lithe SPIR-V resource/fence path. Metal remains preferred on macOS.
+For compatible f32 elementwise chains, both providers retain graph
+intermediates on device and download only terminal outputs. Pravaha owns the
+move-only Vulkan tensor storage; Lithe retains pipeline, descriptor, and fence
+ownership. Metal remains the preferred macOS provider.
+
+`BEDROCK_ENABLE_LITHE_VULKAN` controls the optional target and defaults on when
+the checked-in MoltenVK package is available. Highway SIMD and the interpreter
+remain portable fallbacks.
+
+The Crank example runner offers `--benchmark-gpu` for an explicit comparison.
+It measures the same cached f32-add HL-MIR plan through direct Metal and
+Vulkan/MoltenVK dispatch, including host transfer and completion, without
+changing automatic provider selection.
+
+`crank_gpu_pipeline::execute_observed()` remains automatic. Its optional final
+provider argument is an explicit tuning/test override for a caller that needs
+to evaluate a particular available provider.
 
 Durable artifacts use the opt-in Petika catalog adapter. RocksDB is not a
 Bedrock Lithe dependency. Persistent records contain portable IR, MSL, or

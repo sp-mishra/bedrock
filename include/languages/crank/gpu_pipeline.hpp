@@ -5,6 +5,7 @@
 // and plan descriptors required for one automatic Metal execution.
 
 #include "languages/crank/gpu_metal_execution.hpp"
+#include "languages/crank/gpu_vulkan_execution.hpp"
 
 #include <array>
 #include <cstdint>
@@ -83,7 +84,8 @@ namespace crank {
         template <class Observer = ::lang::telemetry::phase_observer<>>
         [[nodiscard]] std::expected<gpu_metal_execution_summary, gpu_dispatch_result>
         execute_observed(const lithe::exec::auto_execution_policy& policy = {},
-                         const std::uint64_t unit_id = 0) {
+                         const std::uint64_t unit_id = 0,
+                         const gpu_provider provider = gpu_backend::preferred_provider()) {
             const auto resident_bytes = estimated_device_bytes();
             if (resident_bytes > policy.max_device_cache_bytes)
                 return std::unexpected(gpu_dispatch_result{
@@ -122,8 +124,15 @@ namespace crank {
                     },
                 });
             }
-            return gpu_metal_executor{}.template execute_observed<Observer>(
-                graph_, bindings, policy, unit_id);
+            if (provider == gpu_provider::metal)
+                return gpu_metal_executor{}.template execute_observed<Observer>(
+                    graph_, bindings, policy, unit_id);
+#if defined(LITHE_VULKAN_BACKEND_AVAILABLE) && LITHE_VULKAN_BACKEND_AVAILABLE
+            if (provider == gpu_provider::vulkan)
+                return gpu_vulkan_executor{}.execute(graph_, bindings, policy);
+#endif
+            return std::unexpected(gpu_dispatch_result{
+                gpu_dispatch_status::no_device, "gpu: no selected device provider"});
         }
 
         [[nodiscard]] bool empty() const noexcept { return regions_.empty(); }

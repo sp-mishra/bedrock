@@ -57,9 +57,9 @@ namespace crank {
         execute(const gpu_execution_graph& graph,
                 const std::span<const gpu_metal_graph_binding> bindings,
                 const lithe::exec::auto_execution_policy& policy = {}) const {
-            if (gpu_backend::preferred_provider() != gpu_provider::metal)
+            if (!gpu_backend::metal_available())
                 return std::unexpected(gpu_dispatch_result{
-                    gpu_dispatch_status::no_device, "gpu: native Metal is not the selected provider"});
+                    gpu_dispatch_status::no_device, "gpu: native Metal is unavailable"});
 
             auto schedule = graph.schedule(policy, /*device_available=*/true);
             if (!schedule)

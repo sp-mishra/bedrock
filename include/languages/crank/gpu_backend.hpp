@@ -29,6 +29,7 @@
 
 #if __has_include(<vulkan/vulkan.h>) && (defined(HAS_MOLTENVK) || defined(HAS_VULKAN))
 #  include "lithe/backends/lithe_codegen_vulkan.hpp"
+#  include "pravaha/backends/vulkan_gpu.hpp"
 #endif
 
 #include <cstdint>
@@ -422,6 +423,41 @@ namespace crank {
         }
 
 #if defined(LITHE_VULKAN_BACKEND_AVAILABLE) && LITHE_VULKAN_BACKEND_AVAILABLE
+        // Explicit Vulkan/MoltenVK dispatch for opt-in tuning and comparison.
+        // Automatic Crank execution still uses preferred_provider(), which ranks
+        // native Metal first on macOS. Pravaha owns the transient Vulkan buffers;
+        // Lithe owns the SPIR-V module and Vulkan resource lifetime.
+        [[nodiscard]] gpu_dispatch_result
+        dispatch_vulkan(const lithe::codegen::device::kernel_plan& plan,
+                        const std::span<float> output,
+                        const std::span<const float> lhs,
+                        const std::span<const float> rhs) const {
+            if (!supports(plan))
+                return {gpu_dispatch_status::unsupported_shape,
+                        "gpu: unsupported HL-MIR Vulkan kernel"};
+            if (output.empty() || output.size() != lhs.size() || lhs.size() != rhs.size())
+                return {gpu_dispatch_status::unsupported_shape,
+                        "gpu: Vulkan binary buffers must be non-empty and equally sized"};
+            auto module = compile_elementwise(plan, gpu_elementwise_op::add);
+            if (module.validate() != lithe::ir::ir_resolution_state::resolved)
+                return {gpu_dispatch_status::unsupported_shape,
+                        "gpu: shared-plan SPIR-V validation failed"};
+
+            ::pravaha::compute::buffer_descriptor descriptor;
+            descriptor.shape.push_back(output.size());
+            descriptor.element_type = ::pravaha::compute::data_element_type::f32;
+            auto destination = ::pravaha::compute::make_view(output.data(), descriptor);
+            const std::array sources{
+                ::pravaha::compute::make_const_view(lhs.data(), descriptor),
+                ::pravaha::compute::make_const_view(rhs.data(), descriptor),
+            };
+            const auto dispatched = ::pravaha::backends::vulkan::dispatch_elementwise_full<float, 2>(
+                module.identity_hash(), module, destination, sources, module.local_x);
+            if (!dispatched)
+                return {gpu_dispatch_status::no_device, dispatched.error().message};
+            return {gpu_dispatch_status::ok, {}};
+        }
+
         // Compile → install → (device buffers bound by caller) → dispatch. Returns
         // no_device if a physical device / queue could not be acquired so the
         // planner can NADI-pulse to SIMD/CPU. Buffer binding is the caller's

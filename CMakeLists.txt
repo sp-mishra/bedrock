@@ -319,7 +319,10 @@ if(BUILD_Z3)
 endif()
 
 # ===================== MLX (Apple GPU/CPU ML framework) =======================
-option(BUILD_MLX "Build with MLX support" ON)
+# MLX's upstream CMake project fetches third-party sources. Keep Bedrock's
+# default configuration entirely local; an application that has provisioned
+# MLX's complete dependency set can opt in explicitly.
+option(BUILD_MLX "Build with MLX support from a fully provisioned local MLX tree" OFF)
 
 set(HAS_MLX FALSE)
 if(BUILD_MLX AND APPLE)
@@ -418,19 +421,47 @@ if (HAS_METAL_CPP)
         ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
 endif()
 
-# MoltenVK is intentionally not fetched.  When its headers and Vulkan loader
-# are supplied under dependencies/, this target becomes available without
-# changing the Lithe public API.
-option(BEDROCK_ENABLE_LITHE_VULKAN "Enable the optional Vulkan/MoltenVK Lithe backend" OFF)
-if (BEDROCK_ENABLE_LITHE_VULKAN
-    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/MoltenVK"
-    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/Vulkan-Headers")
+# MoltenVK is intentionally not fetched or built here. When its prebuilt macOS
+# package is supplied under dependencies/, this target becomes available without
+# changing Lithe's public API. Metal remains the macOS-first provider; MoltenVK
+# is the portable Vulkan fallback/provider.
+option(BEDROCK_ENABLE_LITHE_VULKAN "Enable the optional Vulkan/MoltenVK Lithe backend" ON)
+set(BEDROCK_MOLTENVK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/MoltenVK")
+set(BEDROCK_MOLTENVK_LIBRARY
+    "${BEDROCK_MOLTENVK_DIR}/Package/Release/MoltenVK/static/MoltenVK.xcframework/macos-arm64_x86_64/libMoltenVK.a")
+set(BEDROCK_MOLTENVK_INCLUDE_DIR "${BEDROCK_MOLTENVK_DIR}/Package/Release/MoltenVK/include")
+set(BEDROCK_MOLTENVK_VULKAN_HEADERS "${BEDROCK_MOLTENVK_DIR}/External/Vulkan-Headers/include")
+if (BEDROCK_ENABLE_LITHE_VULKAN AND APPLE
+    AND EXISTS "${BEDROCK_MOLTENVK_LIBRARY}"
+    AND EXISTS "${BEDROCK_MOLTENVK_INCLUDE_DIR}/vulkan/vulkan.h")
     add_library(bedrock_lithe_vulkan INTERFACE)
     add_library(bedrock::lithe_vulkan ALIAS bedrock_lithe_vulkan)
     target_include_directories(bedrock_lithe_vulkan INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dependencies/Vulkan-Headers/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dependencies/MoltenVK/include>)
-    target_link_libraries(bedrock_lithe_vulkan INTERFACE bedrock::lithe)
+        $<BUILD_INTERFACE:${BEDROCK_MOLTENVK_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${BEDROCK_MOLTENVK_VULKAN_HEADERS}>)
+    find_library(BEDROCK_MOLTENVK_METAL_FRAMEWORK Metal REQUIRED)
+    find_library(BEDROCK_MOLTENVK_FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    find_library(BEDROCK_MOLTENVK_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(BEDROCK_MOLTENVK_IOKIT_FRAMEWORK IOKit REQUIRED)
+    find_library(BEDROCK_MOLTENVK_IOSURFACE_FRAMEWORK IOSurface REQUIRED)
+    find_library(BEDROCK_MOLTENVK_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+    find_library(BEDROCK_MOLTENVK_APPKIT_FRAMEWORK AppKit REQUIRED)
+    find_library(BEDROCK_MOLTENVK_COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    target_link_libraries(bedrock_lithe_vulkan INTERFACE
+        bedrock::lithe
+        "${BEDROCK_MOLTENVK_LIBRARY}"
+        ${BEDROCK_MOLTENVK_METAL_FRAMEWORK}
+        ${BEDROCK_MOLTENVK_FOUNDATION_FRAMEWORK}
+        ${BEDROCK_MOLTENVK_QUARTZCORE_FRAMEWORK}
+        ${BEDROCK_MOLTENVK_IOKIT_FRAMEWORK}
+        ${BEDROCK_MOLTENVK_IOSURFACE_FRAMEWORK}
+        ${BEDROCK_MOLTENVK_COREGRAPHICS_FRAMEWORK}
+        ${BEDROCK_MOLTENVK_APPKIT_FRAMEWORK}
+        ${BEDROCK_MOLTENVK_COREFOUNDATION_FRAMEWORK})
+    target_compile_definitions(bedrock_lithe_vulkan INTERFACE HAS_MOLTENVK=1)
+    message(STATUS "MoltenVK: enabled (${BEDROCK_MOLTENVK_LIBRARY})")
+elseif (BEDROCK_ENABLE_LITHE_VULKAN)
+    message(STATUS "MoltenVK: requested but no prebuilt macOS package is available")
 endif()
 
 # Pravaha is a header-only orchestration and heterogeneous-compute component.
@@ -528,6 +559,9 @@ if (BEDROCK_BUILD_EXAMPLES)
         bedrock::lithe_simd
         bedrock::medha
         spdlog::spdlog_header_only)
+    if (TARGET bedrock::lithe_vulkan)
+        target_link_libraries(bedrock_examples PRIVATE bedrock::lithe_vulkan)
+    endif()
     target_compile_features(bedrock_examples PRIVATE cxx_std_23)
 endif()
 
@@ -572,6 +606,9 @@ if (BUILD_TESTS)
     if (HAS_METAL_CPP)
         target_link_libraries(bedrock_tests PRIVATE
             ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+    endif()
+    if (TARGET bedrock::lithe_vulkan)
+        target_link_libraries(bedrock_tests PRIVATE bedrock::lithe_vulkan)
     endif()
     target_compile_definitions(bedrock_tests PRIVATE
         BEDROCK_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

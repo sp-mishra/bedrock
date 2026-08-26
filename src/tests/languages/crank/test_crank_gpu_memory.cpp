@@ -489,3 +489,46 @@ TEST_CASE (
     REQUIRE(output.front() == 6.0f);
     REQUIRE(output.back() == 6.0f);
 }
+
+TEST_CASE (
+
+"Crank Vulkan pipeline retains a f32 intermediate and downloads only the terminal output"
+,
+"[crank][gpu_memory][vulkan][runtime]"
+)
+ {
+#if defined(LITHE_VULKAN_BACKEND_AVAILABLE) && LITHE_VULKAN_BACKEND_AVAILABLE
+    if (!gpu_backend::vulkan_available()) return;
+
+    constexpr std::size_t count = 8192;
+    auto first_kernel = make_f32_add_kernel(count);
+    auto second_kernel = make_f32_add_kernel(count);
+    std::vector<float> lhs(count, 1.0f), rhs(count, 2.0f), output(count);
+    crank_gpu_pipeline pipeline;
+    const auto first = pipeline.add_binary_region({
+        .function = std::addressof(first_kernel),
+        .inputs = {
+            gpu_metal_input_binding::from_host(lhs),
+            gpu_metal_input_binding::from_host(rhs),
+        },
+    });
+    REQUIRE(first.has_value());
+    REQUIRE(pipeline.add_binary_region({
+        .function = std::addressof(second_kernel),
+        .inputs = {
+            gpu_metal_input_binding::from_region(*first),
+            gpu_metal_input_binding::from_region(*first),
+        },
+        .output = {.values = output},
+    }).has_value());
+
+    const auto result = pipeline.execute_observed({}, 0, gpu_provider::vulkan);
+    if (!result && result.error().status == gpu_dispatch_status::no_device) return;
+    REQUIRE(result.has_value());
+    REQUIRE(result->uploads == 2);
+    REQUIRE(result->downloads == 1);
+    REQUIRE(result->submissions == 2);
+    REQUIRE(output.front() == 6.0f);
+    REQUIRE(output.back() == 6.0f);
+#endif
+}
