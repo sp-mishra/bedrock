@@ -37,6 +37,12 @@ Pravaha's opt-in `metal_buffer_set<T, K>` to retain shared buffers and
 `metal_submission` to submit without immediately waiting. Neither facility is
 part of portable Lithe artifacts or required by a non-Metal consumer.
 
+For device-only chains, `metal_f32_tensor` owns ephemeral Metal storage and
+`metal_backend::dispatch_f32_device_async` consumes and produces those tensors
+without an intermediate host copy. `upload()` and `download()` are explicit;
+the move-only completion token retains the pipeline until `wait()` completes.
+Crank exposes these as `gpu_f32_tensor` and `dispatch_metal_device_async`.
+
 Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
 added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.
 

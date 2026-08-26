@@ -12,15 +12,154 @@
 #include <expected>
 #include <array>
 #include <charconv>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 
 namespace lithe::codegen::backends {
     struct metal_runtime_error { std::string message; };
+
+    struct metal_backend;
+
+    // Ephemeral, move-only f32 storage owned by the selected Metal device.
+    // It never crosses the portable artifact boundary: explicit upload() and
+    // download() are the only host-transfer operations.
+    class metal_f32_tensor {
+    public:
+        metal_f32_tensor() = default;
+        metal_f32_tensor(const metal_f32_tensor&) = delete;
+        metal_f32_tensor& operator=(const metal_f32_tensor&) = delete;
+        metal_f32_tensor(metal_f32_tensor&& other) noexcept { move_from(std::move(other)); }
+        metal_f32_tensor& operator=(metal_f32_tensor&& other) noexcept {
+            if (this != std::addressof(other)) {
+                reset();
+                move_from(std::move(other));
+            }
+            return *this;
+        }
+        ~metal_f32_tensor() { reset(); }
+
+        [[nodiscard]] static std::expected<metal_f32_tensor, metal_runtime_error>
+        allocate(const std::size_t count) {
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+            metal_f32_tensor tensor;
+            tensor.size_ = count;
+            if (count == 0) return tensor;
+            auto& runtime = ::pravaha::backends::metal::metal_gpu_backend::instance();
+            if (!runtime.available())
+                return std::unexpected(metal_runtime_error{"metal: no device for tensor allocation"});
+            tensor.buffer_ = runtime.device->newBuffer(
+                count * sizeof(float), MTL::ResourceStorageModeShared);
+            if (!tensor.buffer_)
+                return std::unexpected(metal_runtime_error{"metal: tensor allocation failed"});
+            return tensor;
+#else
+            static_cast<void>(count);
+            return std::unexpected(metal_runtime_error{"metal: native Metal requires Apple platform and HAS_METAL_CPP"});
+#endif
+        }
+
+        [[nodiscard]] static std::expected<metal_f32_tensor, metal_runtime_error>
+        from_host(const std::span<const float> host) {
+            auto tensor = allocate(host.size());
+            if (!tensor) return std::unexpected(tensor.error());
+            if (const auto copied = tensor->upload(host); !copied) return std::unexpected(copied.error());
+            return tensor;
+        }
+
+        [[nodiscard]] std::expected<void, metal_runtime_error>
+        upload(const std::span<const float> host) {
+            if (host.size() != size_)
+                return std::unexpected(metal_runtime_error{"metal: upload size does not match tensor extent"});
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+            if (size_ != 0 && !buffer_)
+                return std::unexpected(metal_runtime_error{"metal: tensor has no device buffer"});
+            if (size_ != 0) std::memcpy(buffer_->contents(), host.data(), size_ * sizeof(float));
+            return {};
+#else
+            return std::unexpected(metal_runtime_error{"metal: native Metal requires Apple platform and HAS_METAL_CPP"});
+#endif
+        }
+
+        [[nodiscard]] std::expected<void, metal_runtime_error>
+        download(const std::span<float> host) const {
+            if (host.size() != size_)
+                return std::unexpected(metal_runtime_error{"metal: download size does not match tensor extent"});
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+            if (size_ != 0 && !buffer_)
+                return std::unexpected(metal_runtime_error{"metal: tensor has no device buffer"});
+            if (size_ != 0) std::memcpy(host.data(), buffer_->contents(), size_ * sizeof(float));
+            return {};
+#else
+            return std::unexpected(metal_runtime_error{"metal: native Metal requires Apple platform and HAS_METAL_CPP"});
+#endif
+        }
+
+        [[nodiscard]] std::size_t size() const noexcept { return size_; }
+        [[nodiscard]] bool valid() const noexcept {
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+            return size_ == 0 || buffer_ != nullptr;
+#else
+            return false;
+#endif
+        }
+
+    private:
+        friend struct metal_backend;
+        std::size_t size_ = 0;
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+        MTL::Buffer* buffer_ = nullptr;
+#endif
+
+        void reset() noexcept {
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+            if (buffer_) buffer_->release();
+            buffer_ = nullptr;
+#endif
+            size_ = 0;
+        }
+        void move_from(metal_f32_tensor&& other) noexcept {
+            size_ = std::exchange(other.size_, 0);
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+            buffer_ = std::exchange(other.buffer_, nullptr);
+#endif
+        }
+    };
+
+    class metal_device_submission {
+    public:
+        metal_device_submission() = default;
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+        explicit metal_device_submission(::pravaha::backends::metal::metal_submission submission,
+                                         std::shared_ptr<void> pipeline_lifetime) noexcept
+            : submission_(std::move(submission)), pipeline_lifetime_(std::move(pipeline_lifetime)) {}
+#endif
+        metal_device_submission(const metal_device_submission&) = delete;
+        metal_device_submission& operator=(const metal_device_submission&) = delete;
+        metal_device_submission(metal_device_submission&&) noexcept = default;
+        metal_device_submission& operator=(metal_device_submission&&) noexcept = default;
+
+        [[nodiscard]] std::expected<void, metal_runtime_error> wait() const {
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+            if (const auto result = submission_.wait(); !result)
+                return std::unexpected(metal_runtime_error{result.error().message});
+            return {};
+#else
+            return std::unexpected(metal_runtime_error{"metal: native Metal requires Apple platform and HAS_METAL_CPP"});
+#endif
+        }
+
+    private:
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+        ::pravaha::backends::metal::metal_submission submission_;
+        std::shared_ptr<void> pipeline_lifetime_;
+#endif
+    };
 
     namespace metal_detail {
         [[nodiscard]] inline std::uint64_t source_cache_key(const std::string_view source,
@@ -585,6 +724,48 @@ namespace lithe::codegen::backends {
             if (!result)
                 return std::unexpected(metal_runtime_error{"metal: dispatch failed: " + result.error().message});
             return {};
+#else
+            static_cast<void>(art); static_cast<void>(output); static_cast<void>(inputs);
+            return std::unexpected(metal_runtime_error{"metal: native Metal requires Apple platform and HAS_METAL_CPP"});
+#endif
+        }
+
+        // Asynchronous device-resident dispatch. Inputs and output stay on the
+        // Metal device until the caller explicitly downloads a tensor. This is
+        // the composition path for chains of compatible elementwise kernels.
+        template <std::size_t InputCount>
+        [[nodiscard]] static std::expected<metal_device_submission, metal_runtime_error>
+        dispatch_f32_device_async(
+            const compilation_artifact& art,
+            metal_f32_tensor& output,
+            const std::array<const metal_f32_tensor*, InputCount>& inputs) {
+            static_assert(InputCount > 0, "a Metal elementwise kernel requires an input tensor");
+#if defined(__APPLE__) && defined(HAS_METAL_CPP)
+            if (!art.handle || art.handle->kind != artifact_handle_kind::native_compute_pipeline)
+                return std::unexpected(metal_runtime_error{"metal: artifact has no native compute pipeline"});
+            if (art.metadata.contains("element_type") && art.metadata.at("element_type") != "f32")
+                return std::unexpected(metal_runtime_error{"metal: artifact is not an f32 kernel"});
+            const auto count = inputs.front() != nullptr ? inputs.front()->size() : 0;
+            if (count == 0) return std::unexpected(metal_runtime_error{"metal: device dispatch requires a non-empty input"});
+            if (!output.valid() || output.size() != count)
+                return std::unexpected(metal_runtime_error{"metal: output tensor does not match the input domain"});
+            if (std::ranges::any_of(inputs, [count](const auto* input) {
+                    return input == nullptr || !input->valid() || input->size() != count;
+                }))
+                return std::unexpected(metal_runtime_error{"metal: input tensors do not share a valid extent"});
+            if (art.metadata.contains("binding_count")
+                && art.metadata.at("binding_count") != std::to_string(InputCount + 1))
+                return std::unexpected(metal_runtime_error{"metal: dispatch binding count does not match the artifact ABI"});
+            auto* pipeline = art.handle->get<MTL::ComputePipelineState>();
+            if (!pipeline) return std::unexpected(metal_runtime_error{"metal: pipeline handle is null"});
+            std::array<MTL::Buffer*, InputCount> input_buffers{};
+            for (std::size_t i = 0; i < InputCount; ++i) input_buffers[i] = inputs[i]->buffer_;
+            const auto grid = ::pravaha::hetero::compute_grid_descriptor::from_flat(count);
+            auto submitted = ::pravaha::backends::metal::metal_gpu_backend::instance()
+                .dispatch_device_multi_async(pipeline, output.buffer_, input_buffers, count, grid);
+            if (!submitted)
+                return std::unexpected(metal_runtime_error{"metal: device dispatch failed: " + submitted.error().message});
+            return metal_device_submission{std::move(*submitted), art.handle->payload};
 #else
             static_cast<void>(art); static_cast<void>(output); static_cast<void>(inputs);
             return std::unexpected(metal_runtime_error{"metal: native Metal requires Apple platform and HAS_METAL_CPP"});

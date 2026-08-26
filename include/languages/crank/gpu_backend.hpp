@@ -33,6 +33,7 @@
 
 #include <cstdint>
 #include <array>
+#include <expected>
 #include <span>
 #include <string>
 #include <vector>
@@ -268,6 +269,8 @@ namespace crank {
 
     // Crank consumes Lithe's shared provider-selection policy.
     using gpu_provider = lithe::codegen::backends::device_provider;
+    using gpu_f32_tensor = lithe::codegen::backends::metal_f32_tensor;
+    using gpu_device_submission = lithe::codegen::backends::metal_device_submission;
 
     // ============================================================================
     // gpu_backend — capability probe + elementwise SPIR-V compile/install/dispatch.
@@ -389,6 +392,31 @@ namespace crank {
             if (!dispatched)
                 return {gpu_dispatch_status::no_device, dispatched.error().message};
             return {gpu_dispatch_status::ok, {}};
+        }
+
+        // Explicit device-resident path.  The returned submission owns only the
+        // command-buffer completion token; the caller owns its tensors and may
+        // use the output tensor as a later kernel input without downloading it.
+        [[nodiscard]] std::expected<gpu_device_submission, gpu_dispatch_result>
+        dispatch_metal_device_async(
+            const lithe::codegen::device::kernel_plan& plan,
+            gpu_f32_tensor& output,
+            const std::array<const gpu_f32_tensor*, 2>& inputs) const {
+            if (!supports(plan))
+                return std::unexpected(gpu_dispatch_result{
+                    gpu_dispatch_status::unsupported_shape, "gpu: unsupported HL-MIR Metal kernel"});
+            auto artifact = compile_metal(plan);
+            if (!artifact.ok())
+                return std::unexpected(gpu_dispatch_result{
+                    gpu_dispatch_status::no_device,
+                    artifact.diagnostics.empty() ? "gpu: Metal pipeline compilation failed"
+                                                 : artifact.diagnostics.back()});
+            auto dispatched = lithe::codegen::backends::metal_backend::dispatch_f32_device_async<2>(
+                artifact, output, inputs);
+            if (!dispatched)
+                return std::unexpected(gpu_dispatch_result{
+                    gpu_dispatch_status::no_device, dispatched.error().message});
+            return std::move(*dispatched);
         }
 
 #if defined(LITHE_VULKAN_BACKEND_AVAILABLE) && LITHE_VULKAN_BACKEND_AVAILABLE

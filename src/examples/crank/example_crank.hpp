@@ -1393,6 +1393,38 @@ fn add_vec(xs: []Float32) -> []Float32 {
         if (dispatched && gpu.preferred_provider() == gpu_provider::metal && out.front() != 3.0f)
             return testfw::fail("ex36: native Metal add mismatch");
 
+        bool resident_chain_ok = false;
+        if (dispatched && gpu.preferred_provider() == gpu_provider::metal) {
+            auto lhs_device = gpu_f32_tensor::from_host(lhs);
+            auto rhs_device = gpu_f32_tensor::from_host(rhs);
+            auto intermediate = gpu_f32_tensor::allocate(n);
+            auto final = gpu_f32_tensor::allocate(n);
+            if (!lhs_device || !rhs_device || !intermediate || !final)
+                return testfw::fail("ex36: device-resident tensor allocation failed");
+
+            const std::array<const gpu_f32_tensor*, 2> first_inputs{
+                std::addressof(*lhs_device), std::addressof(*rhs_device)};
+            auto first = gpu.dispatch_metal_device_async(plan, *intermediate, first_inputs);
+            if (!first) return testfw::fail("ex36: first device-resident dispatch failed");
+
+            // The command queue preserves submission order.  The second kernel
+            // consumes the first output directly on Metal; no host round trip
+            // occurs between these two dispatches.
+            const std::array<const gpu_f32_tensor*, 2> second_inputs{
+                std::addressof(*intermediate), std::addressof(*intermediate)};
+            auto second = gpu.dispatch_metal_device_async(plan, *final, second_inputs);
+            if (!second) return testfw::fail("ex36: chained device-resident dispatch failed");
+            if (const auto completed = second->wait(); !completed)
+                return testfw::fail("ex36: chained Metal submission failed");
+            if (const auto completed = first->wait(); !completed)
+                return testfw::fail("ex36: first Metal submission failed");
+
+            std::vector<float> final_host(n);
+            if (const auto copied = final->download(final_host); !copied || final_host.front() != 6.0f)
+                return testfw::fail("ex36: device-resident chain mismatch");
+            resident_chain_ok = true;
+        }
+
         // Fallback path: when the device is unavailable, produce the same result on
         // the SIMD backend so the program still yields a typed result.
         if (!dispatched) {
@@ -1408,9 +1440,9 @@ fn add_vec(xs: []Float32) -> []Float32 {
             }
             return "unknown";
         };
-        lg::info("crank ex36 (e2e GPU): SPIR-V validated, provider={}, available={}, dispatch={}",
+        lg::info("crank ex36 (e2e GPU): SPIR-V validated, provider={}, available={}, dispatch={}, resident_chain={}",
                  provider_name(gpu.preferred_provider()),
-                 gpu_backend::available(), crank::to_string(dispatch.status));
+                 gpu_backend::available(), crank::to_string(dispatch.status), resident_chain_ok);
         return {};
     }
 
