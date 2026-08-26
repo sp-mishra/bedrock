@@ -65,6 +65,29 @@ namespace lithe::exec {
         return "safe_cpu";
     }
 
+    // Device residency is an execution-property policy, separate from backend
+    // selection.  Automatic is deliberately conservative: it retains a value
+    // only when a later device region consumes it and no host observation is due.
+    enum class device_residency_policy : std::uint8_t {
+        automatic,
+        prefer_device,
+        require_device,
+        host_only,
+    };
+
+    [[nodiscard]] inline constexpr std::string_view
+    to_string(const device_residency_policy policy) noexcept {
+        switch (policy) {
+        case device_residency_policy::automatic: return "automatic";
+        case device_residency_policy::prefer_device: return "prefer_device";
+        case device_residency_policy::require_device: return "require_device";
+        case device_residency_policy::host_only: return "host_only";
+        }
+        return "automatic";
+    }
+
+    enum class device_fusion_policy : std::uint8_t { automatic, disabled, require };
+
     // =========================================================================
     // execution_hint — soft/hard placement request from a frontend attribute
     //
@@ -147,6 +170,12 @@ namespace lithe::exec {
         bool allow_async = true;
         bool allow_distributed = false;
         bool deterministic = false; // global determinism constraint
+
+        device_residency_policy device_residency = device_residency_policy::automatic;
+        device_fusion_policy device_fusion = device_fusion_policy::automatic;
+        std::uint32_t min_device_chain_length = 2;
+        std::uint64_t min_device_bytes = 64 * 1024;
+        std::uint64_t max_device_cache_bytes = 256ULL * 1024 * 1024;
 
         backend_policy backend = backend_policy::best_available;
         fallback_policy fallback = fallback_policy::safe_cpu;

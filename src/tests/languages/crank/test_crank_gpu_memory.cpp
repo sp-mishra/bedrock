@@ -100,3 +100,48 @@ TEST_CASE (
     auto res = synchronize(plan, /*allow_replay=*/true);
     REQUIRE(res.completed());
 }
+
+TEST_CASE (
+
+"automatic residency retains an internal device-chain output"
+,
+"[crank][gpu_memory][residency]"
+)
+ {
+    gpu_region r;
+    auto input = buf(address_space::device, buffer_access::read, residency_state::host_current);
+    input.byte_size = 64 * 1024;
+    auto output = buf(address_space::device, buffer_access::write, residency_state::invalid);
+    output.byte_size = 64 * 1024;
+    r.buffers = {input, output};
+    r.compatible_device_chain_length = 2;
+    r.output_consumed_on_device = true;
+    r.host_observes_output = false;
+
+    lithe::exec::auto_execution_policy policy;
+    const auto decision = decide_device_execution(r, policy, true);
+    REQUIRE(decision.use_device);
+    REQUIRE(decision.retain_outputs);
+    REQUIRE(decision.fuse_with_successor);
+
+    const auto plan = plan_transfers(r, policy);
+    REQUIRE(plan.nodes.size() == 1);
+    REQUIRE(plan.nodes.front().direction == transfer_direction::upload);
+}
+
+TEST_CASE (
+
+"host-only residency policy refuses automatic device execution"
+,
+"[crank][gpu_memory][residency]"
+)
+ {
+    gpu_region r;
+    r.output_consumed_on_device = true;
+    r.host_observes_output = false;
+    lithe::exec::auto_execution_policy policy;
+    policy.device_residency = lithe::exec::device_residency_policy::host_only;
+    const auto decision = decide_device_execution(r, policy, true);
+    REQUIRE_FALSE(decision.use_device);
+    REQUIRE_FALSE(decision.retain_outputs);
+}

@@ -20,6 +20,7 @@
 // dispatch include — it always compiles regardless of the Vulkan backend.
 
 #include "languages/crank/exec_result.hpp"
+#include "lithe/lithe_exec/exec_hint.hpp"
 
 #include <cstdint>
 #include <string>
@@ -104,7 +105,38 @@ namespace crank {
         std::uint32_t device = 0;
         std::vector<device_buffer> buffers;
         bool has_visible_writes = false; // set once a device write is committed
+        std::uint32_t compatible_device_chain_length = 1;
+        bool output_consumed_on_device = false;
+        bool host_observes_output = true;
     };
+
+    struct device_execution_decision {
+        bool use_device = false;
+        bool retain_outputs = false;
+        bool fuse_with_successor = false;
+    };
+
+    [[nodiscard]] inline device_execution_decision
+    decide_device_execution(const gpu_region& region,
+                            const lithe::exec::auto_execution_policy& policy,
+                            const bool device_available) noexcept {
+        if (policy.device_residency == lithe::exec::device_residency_policy::host_only)
+            return {};
+        std::uint64_t bytes = 0;
+        for (const auto& buffer : region.buffers) bytes += buffer.byte_size;
+        const bool chain_eligible = region.compatible_device_chain_length >= policy.min_device_chain_length;
+        const bool size_eligible = bytes >= policy.min_device_bytes;
+        const bool use_device = device_available && policy.allow_gpu
+            && (policy.device_residency == lithe::exec::device_residency_policy::require_device
+                || policy.device_residency == lithe::exec::device_residency_policy::prefer_device
+                || (chain_eligible && size_eligible));
+        const bool retain = use_device && region.output_consumed_on_device
+            && !region.host_observes_output;
+        return {.use_device = use_device,
+                .retain_outputs = retain,
+                .fuse_with_successor = retain
+                    && policy.device_fusion != lithe::exec::device_fusion_policy::disabled};
+    }
 
     // ============================================================================
     // transfer — a single host↔device copy (design §11.3)
@@ -151,10 +183,13 @@ namespace crank {
     // events of the inputs (a coarse but correct ordering for elementwise regions).
     // ============================================================================
 
-    [[nodiscard]] inline transfer_plan plan_transfers(const gpu_region& region) {
+    [[nodiscard]] inline transfer_plan plan_transfers(
+        const gpu_region& region,
+        const lithe::exec::auto_execution_policy& policy = {}) {
         transfer_plan plan;
         std::uint64_t next_event = 1;
         std::vector<std::uint64_t> upload_events;
+        const auto decision = decide_device_execution(region, policy, /*device_available=*/true);
 
         // Pass 1: uploads for device-read inputs that are host-current.
         for (const auto& b : region.buffers) {
@@ -181,7 +216,7 @@ namespace crank {
             if (b.space == address_space::unified) continue;
             const bool device_writes =
                 b.access == buffer_access::write || b.access == buffer_access::read_write;
-            if (device_writes) {
+            if (device_writes && !decision.retain_outputs) {
                 transfer_node n;
                 n.buf = &b;
                 n.from = address_space::device;
@@ -196,6 +231,17 @@ namespace crank {
         }
 
         return plan;
+    }
+
+    // Update the abstract residency model after a successful dispatch.  This is
+    // separate from synchronization: a retained output is not host-observable
+    // until a later explicit download boundary is planned.
+    inline void mark_device_dispatch_complete(gpu_region& region) noexcept {
+        for (auto& buffer : region.buffers) {
+            const bool device_writes = buffer.access == buffer_access::write
+                || buffer.access == buffer_access::read_write;
+            if (device_writes) buffer.residency = residency_state::device_current;
+        }
     }
 
     // ============================================================================

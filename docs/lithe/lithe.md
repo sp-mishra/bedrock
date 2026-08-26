@@ -43,6 +43,13 @@ without an intermediate host copy. `upload()` and `download()` are explicit;
 the move-only completion token retains the pipeline until `wait()` completes.
 Crank exposes these as `gpu_f32_tensor` and `dispatch_metal_device_async`.
 
+`lithe::exec::auto_execution_policy` controls this automatically. Its default
+retains only an internal, compatible device chain above 64 KiB and downloads at
+the next host-observation boundary. Users may select `prefer_device`,
+`require_device`, or `host_only`, and tune the device-chain length, minimum
+bytes, memory budget, fusion, and asynchronous submission independently of
+portable execution.
+
 Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
 added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.
 
