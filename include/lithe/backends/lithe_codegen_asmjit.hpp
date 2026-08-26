@@ -678,6 +678,27 @@ namespace lithe::codegen::backends {
             }
         }
 
+        // A physical register already denotes the final allocation chosen by
+        // physical MIR.  Emit directly into it instead of manufacturing a
+        // short-lived virtual register followed by a move.  Spills still need
+        // a temporary and are committed through write_def().
+        static A64Gp def_or_temp(A64Compiler& cc,
+                                 RegMap& reg_map,
+                                 const allocated_operand& def) {
+            if (def.type == allocated_operand::kind::preg)
+                return get_vreg(cc, reg_map, std::get<preg>(def.value).id);
+            return cc.new_gpx();
+        }
+
+        static void commit_def(A64Compiler& cc,
+                               RegMap& reg_map,
+                               SpillMap& spill_map,
+                               const allocated_operand& def,
+                               A64Gp value) {
+            if (def.type != allocated_operand::kind::preg)
+                write_def(cc, reg_map, spill_map, def, value);
+        }
+
         // ── FP register helpers (A64 double-precision SIMD registers) ──────────
 
         static A64Vec get_fp_vreg(A64Compiler& cc, FpRegMap& fp_map, std::uint16_t id) {
@@ -880,6 +901,14 @@ namespace lithe::codegen::backends {
             write_def(cc, reg_map, spill_map, def, src);
         };
 
+        auto result = [&](const allocated_operand& def) {
+            return def_or_temp(cc, reg_map, def);
+        };
+
+        auto commit = [&](const allocated_operand& def, A64Gp value) {
+            commit_def(cc, reg_map, spill_map, def, value);
+        };
+
             for (const auto& block: fn.blocks) {
                 if (error) break;
                 // Skip dead blocks that survived dead-code elimination.
@@ -900,9 +929,16 @@ namespace lithe::codegen::backends {
                                 fail("mov/load_imm: bad operands");
                                 break;
                             }
-                            A64Gp src;
-                            if (!read(inst.uses[0], src)) break;
-                            write(inst.defs[0], src);
+                            A64Gp dst = result(inst.defs[0]);
+                            if (inst.op == opcode::load_imm &&
+                                inst.uses[0].type == allocated_operand::kind::immediate_i64) {
+                                cc.mov(dst, asmjit::Imm(std::get<std::int64_t>(inst.uses[0].value)));
+                            } else {
+                                A64Gp src;
+                                if (!read(inst.uses[0], src)) break;
+                                if (src.id() != dst.id()) cc.mov(dst, src);
+                            }
+                            commit(inst.defs[0], dst);
                             break;
                         }
 
@@ -916,9 +952,9 @@ namespace lithe::codegen::backends {
                                 break;
                             }
                             const auto idx = std::get<std::uint32_t>(inst.uses[0].value);
-                            A64Gp arg_reg = cc.new_gpx();
-                            func_node->set_arg(idx, arg_reg);
-                            write(inst.defs[0], arg_reg);
+                            A64Gp dst = result(inst.defs[0]);
+                            func_node->set_arg(idx, dst);
+                            commit(inst.defs[0], dst);
                             break;
                         }
 
@@ -927,11 +963,11 @@ namespace lithe::codegen::backends {
                                 fail("add: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             cc.add(res, lhs, rhs);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -940,11 +976,11 @@ namespace lithe::codegen::backends {
                                 fail("sub: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             cc.sub(res, lhs, rhs);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -953,11 +989,11 @@ namespace lithe::codegen::backends {
                                 fail("mul: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             cc.mul(res, lhs, rhs);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -967,7 +1003,7 @@ namespace lithe::codegen::backends {
                                 fail("div: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             asmjit::Label ok = cc.new_label(), done = cc.new_label();
@@ -977,7 +1013,7 @@ namespace lithe::codegen::backends {
                             cc.bind(ok);
                             cc.sdiv(res, lhs, rhs);
                             cc.bind(done);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -987,7 +1023,7 @@ namespace lithe::codegen::backends {
                                 fail("mod: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, tmp = cc.new_gpx(), res = cc.new_gpx();
+                            A64Gp lhs, rhs, tmp = cc.new_gpx(), res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             asmjit::Label ok = cc.new_label(), done = cc.new_label();
@@ -998,7 +1034,7 @@ namespace lithe::codegen::backends {
                             cc.sdiv(tmp, lhs, rhs);
                             cc.msub(res, tmp, rhs, lhs);
                             cc.bind(done);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1007,10 +1043,10 @@ namespace lithe::codegen::backends {
                                 fail("neg: bad operands");
                                 break;
                             }
-                            A64Gp src, res = cc.new_gpx();
+                            A64Gp src, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], src)) break;
                             cc.neg(res, src);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1019,11 +1055,11 @@ namespace lithe::codegen::backends {
                                 fail("bit_and: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             cc.and_(res, lhs, rhs);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1032,11 +1068,11 @@ namespace lithe::codegen::backends {
                                 fail("bit_or: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             cc.orr(res, lhs, rhs);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1045,11 +1081,11 @@ namespace lithe::codegen::backends {
                                 fail("bit_xor: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             cc.eor(res, lhs, rhs);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1058,10 +1094,10 @@ namespace lithe::codegen::backends {
                                 fail("bit_not: bad operands");
                                 break;
                             }
-                            A64Gp src, res = cc.new_gpx();
+                            A64Gp src, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], src)) break;
                             cc.mvn(res, src);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1070,11 +1106,11 @@ namespace lithe::codegen::backends {
                                 fail("shl: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             cc.lsl(res, lhs, rhs);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1083,13 +1119,13 @@ namespace lithe::codegen::backends {
                                 fail("shr: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             // MIR shr is ARITHMETIC (sign-preserving) — matches the
                             // interpreter and partial-evaluator reference semantics.
                             cc.asr(res, lhs, rhs);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1102,7 +1138,7 @@ namespace lithe::codegen::backends {
                             A64Gp lhs, rhs;
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
-                            A64Gp l1 = cc.new_gpx(), r1 = cc.new_gpx(), res = cc.new_gpx();
+                            A64Gp l1 = cc.new_gpx(), r1 = cc.new_gpx(), res = result(inst.defs[0]);
                             cc.cmp(lhs, asmjit::Imm(0));
                             cc.cset(l1, asmjit::a64::CondCode::kNE);
                             cc.cmp(rhs, asmjit::Imm(0));
@@ -1111,7 +1147,7 @@ namespace lithe::codegen::backends {
                                 cc.and_(res, l1, r1);
                             else
                                 cc.orr(res, l1, r1);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1120,11 +1156,11 @@ namespace lithe::codegen::backends {
                                 fail("logical_not: bad operands");
                                 break;
                             }
-                            A64Gp src, res = cc.new_gpx();
+                            A64Gp src, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], src)) break;
                             cc.cmp(src, asmjit::Imm(0));
                             cc.cset(res, asmjit::a64::CondCode::kEQ);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1138,7 +1174,7 @@ namespace lithe::codegen::backends {
                                 fail("cmp: bad operands");
                                 break;
                             }
-                            A64Gp lhs, rhs, res = cc.new_gpx();
+                            A64Gp lhs, rhs, res = result(inst.defs[0]);
                             if (!read(inst.uses[0], lhs)) break;
                             if (!read(inst.uses[1], rhs)) break;
                             cc.cmp(lhs, rhs);
@@ -1159,7 +1195,7 @@ namespace lithe::codegen::backends {
                                 default: break;
                             }
                             cc.cset(res, cc_code);
-                            write(inst.defs[0], res);
+                            commit(inst.defs[0], res);
                             break;
                         }
 
@@ -1177,9 +1213,9 @@ namespace lithe::codegen::backends {
                             } else {
                                 const auto slot_id = std::get<spill_slot>(inst.uses[0].value).id;
                                 auto &mem = ensure_spill(cc, spill_map, slot_id, phys);
-                                A64Gp dst = cc.new_gpx();
+                                A64Gp dst = result(inst.defs[0]);
                                 cc.ldr(dst, mem);
-                                write(inst.defs[0], dst);
+                                commit(inst.defs[0], dst);
                             }
                             break;
                         }
@@ -1217,9 +1253,9 @@ namespace lithe::codegen::backends {
                             if (inst.uses.size() > 1 &&
                                 inst.uses[1].type == allocated_operand::kind::immediate_i64)
                                 offset = std::get<std::int64_t>(inst.uses[1].value);
-                            A64Gp dst = cc.new_gpx();
+                            A64Gp dst = result(inst.defs[0]);
                             cc.ldr(dst, asmjit::a64::ptr(base, static_cast<int32_t>(offset)));
-                            write(inst.defs[0], dst);
+                            commit(inst.defs[0], dst);
                             break;
                         }
 
@@ -1781,6 +1817,23 @@ namespace lithe::codegen::backends {
             }
         }
 
+        static X86Gp def_or_temp(X86Compiler& cc,
+                                 RegMap& reg_map,
+                                 const allocated_operand& def) {
+            if (def.type == allocated_operand::kind::preg)
+                return get_vreg(cc, reg_map, std::get<preg>(def.value).id);
+            return cc.new_gp64();
+        }
+
+        static void commit_def(X86Compiler& cc,
+                               RegMap& reg_map,
+                               SpillMap& spill_map,
+                               const allocated_operand& def,
+                               X86Gp value) {
+            if (def.type != allocated_operand::kind::preg)
+                write_def(cc, reg_map, spill_map, def, value);
+        }
+
         static asmjit::TypeId x86_mir_arg_type(const argument_descriptor& arg) {
             (void)arg;
             return asmjit::TypeId::kInt64;
@@ -1893,6 +1946,14 @@ namespace lithe::codegen::backends {
                 write_def(cc, reg_map, spill_map, def, src);
             };
 
+            auto result = [&](const allocated_operand& def) {
+                return def_or_temp(cc, reg_map, def);
+            };
+
+            auto commit = [&](const allocated_operand& def, X86Gp value) {
+                commit_def(cc, reg_map, spill_map, def, value);
+            };
+
             for (const auto& block : fn.blocks) {
                 if (error) break;
                 // Skip dead blocks that survived dead-code elimination.
@@ -1913,9 +1974,16 @@ namespace lithe::codegen::backends {
                             fail("mov/load_imm: bad operands");
                             break;
                         }
-                        X86Gp src;
-                        if (!read(inst.uses[0], src)) break;
-                        write(inst.defs[0], src);
+                        X86Gp dst = result(inst.defs[0]);
+                        if (inst.op == opcode::load_imm &&
+                            inst.uses[0].type == allocated_operand::kind::immediate_i64) {
+                            cc.mov(dst, asmjit::Imm(std::get<std::int64_t>(inst.uses[0].value)));
+                        } else {
+                            X86Gp src;
+                            if (!read(inst.uses[0], src)) break;
+                            if (src.id() != dst.id()) cc.mov(dst, src);
+                        }
+                        commit(inst.defs[0], dst);
                         break;
                     }
 
@@ -1929,9 +1997,9 @@ namespace lithe::codegen::backends {
                             break;
                         }
                         const auto idx = std::get<std::uint32_t>(inst.uses[0].value);
-                        X86Gp arg_reg = cc.new_gp64();
-                        func_node->set_arg(idx, arg_reg);
-                        write(inst.defs[0], arg_reg);
+                        X86Gp dst = result(inst.defs[0]);
+                        func_node->set_arg(idx, dst);
+                        commit(inst.defs[0], dst);
                         break;
                     }
 
@@ -1940,12 +2008,16 @@ namespace lithe::codegen::backends {
                             fail("add: bad operands");
                             break;
                         }
-                        X86Gp lhs, rhs, res = cc.new_gp64();
+                        X86Gp lhs, rhs, res = result(inst.defs[0]);
                         if (!read(inst.uses[0], lhs)) break;
                         if (!read(inst.uses[1], rhs)) break;
-                        cc.mov(res, lhs);
-                        cc.add(res, rhs);
-                        write(inst.defs[0], res);
+                        if (res.id() == rhs.id() && res.id() != lhs.id())
+                            cc.add(res, lhs);
+                        else {
+                            if (res.id() != lhs.id()) cc.mov(res, lhs);
+                            cc.add(res, rhs);
+                        }
+                        commit(inst.defs[0], res);
                         break;
                     }
 
@@ -1968,12 +2040,16 @@ namespace lithe::codegen::backends {
                             fail("mul: bad operands");
                             break;
                         }
-                        X86Gp lhs, rhs, res = cc.new_gp64();
+                        X86Gp lhs, rhs, res = result(inst.defs[0]);
                         if (!read(inst.uses[0], lhs)) break;
                         if (!read(inst.uses[1], rhs)) break;
-                        cc.mov(res, lhs);
-                        cc.imul(res, rhs);
-                        write(inst.defs[0], res);
+                        if (res.id() == rhs.id() && res.id() != lhs.id())
+                            cc.imul(res, lhs);
+                        else {
+                            if (res.id() != lhs.id()) cc.mov(res, lhs);
+                            cc.imul(res, rhs);
+                        }
+                        commit(inst.defs[0], res);
                         break;
                     }
 

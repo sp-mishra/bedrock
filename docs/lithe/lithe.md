@@ -1578,6 +1578,9 @@ Crank execution-path note (`include/languages/crank/execute.hpp`):
 - Crank additionally provides `lower_to_hl_observed<Observer>` and `lower_to_physical_observed<Observer>` for the
   generic-IR and physical-lowering boundaries. The migrated benchmark demonstrates all four phases with a bounded,
   overwrite-oldest Nadi ring sink and a separate feedback route.
+- The AArch64 AsmJit backend emits common physical-MIR integer definitions directly into their assigned virtual
+  register. This avoids an otherwise redundant temporary-to-destination move for argument loads, immediates, scalar
+  arithmetic, comparisons, and simple loads; spill definitions retain their explicit store path.
 
 **Status.** crank's `execute`/`aot` layer previously lowered + verified then ran the
 interpreter, caching only a fingerprint (not native code). As of this implementation,
