@@ -40,6 +40,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -408,6 +409,20 @@ namespace crank {
         return res;
     }
 
+    template <class Observer = ::lang::telemetry::phase_observer<>>
+    [[nodiscard]] inline lower_phase_result
+    lower_to_physical_observed(const lower_hl_result& hl_res,
+                               const std::uint64_t unit_id = 0) {
+        ::lang::telemetry::phase_scope<Observer> scope{{
+            .unit_id = unit_id,
+            .stage = ::lang::telemetry::phase::physical_lower,
+        }};
+        auto result = lower_to_physical(hl_res);
+        scope.set_outcome(result.ok() ? ::lang::telemetry::phase_outcome::success
+                                      : ::lang::telemetry::phase_outcome::failed);
+        return result;
+    }
+
     // ============================================================================
     // execute_physical — phase 2: run an already-lowered physical MIR
     //
@@ -439,14 +454,53 @@ namespace crank {
     // the explicit interpreter path.
     // ============================================================================
 
-    [[nodiscard]] inline crank_execute_result
-    execute_physical_native(const lithe::codegen::mir::physical_mir_function& phys,
-                            const std::vector<std::int64_t>& args = {},
-                            execute_options opts = {}) {
-        crank_execute_result res;
-        res.stats.instr_count = detail::count_instrs(phys);
-        res.stats.branch_count = detail::count_branches(phys);
-        res.stats.block_count = detail::count_blocks(phys);
+    // Prepared execution retains a compiled artifact across calls.  It is the
+    // hot-path API: preparation owns planning, fingerprinting, and cache lookup;
+    // invocation is a direct typed call when native code is available.
+    class prepared_native_execution {
+    public:
+        using native_i64_entry = lithe::execution::prepared_execution::native_i64_entry;
+
+        prepared_native_execution(lithe::execution::prepared_execution prepared,
+                                  execute_stats preparation_stats) noexcept
+            : prepared_(std::move(prepared)), preparation_stats_(preparation_stats) {}
+
+        [[nodiscard]] bool is_native() const noexcept { return prepared_.is_native(); }
+        [[nodiscard]] bool fallback_fired() const noexcept { return prepared_.used_fallback(); }
+        [[nodiscard]] native_i64_entry native_entry() const noexcept {
+            return prepared_.native_entry();
+        }
+        [[nodiscard]] std::optional<std::int64_t>
+        invoke(const std::span<const std::int64_t> args = {}) const noexcept {
+            return prepared_.invoke(args);
+        }
+        template <class Observer = ::lang::telemetry::phase_observer<>>
+        [[nodiscard]] std::optional<std::int64_t>
+        invoke_observed(const std::span<const std::int64_t> args = {},
+                        const std::uint64_t unit_id = 0) const noexcept {
+            return prepared_.template invoke_observed<Observer>(args, unit_id);
+        }
+        [[nodiscard]] const execute_stats& preparation_stats() const noexcept {
+            return preparation_stats_;
+        }
+        [[nodiscard]] const lithe::execution::compile_result& compilation() const noexcept {
+            return prepared_.result();
+        }
+
+    private:
+        lithe::execution::prepared_execution prepared_;
+        execute_stats preparation_stats_;
+    };
+
+    template <class Observer = ::lang::telemetry::phase_observer<>>
+    [[nodiscard]] inline prepared_native_execution
+    prepare_physical_native(const lithe::codegen::mir::physical_mir_function& phys,
+                            execute_options opts = {},
+                            const std::uint64_t unit_id = 0) {
+        execute_stats stats;
+        stats.instr_count = detail::count_instrs(phys);
+        stats.branch_count = detail::count_branches(phys);
+        stats.block_count = detail::count_blocks(phys);
 
         lithe::execution::compile_request req;
         req.hint = opts.hint;
@@ -463,22 +517,33 @@ namespace crank {
         static lithe::execution::artifact_store s_native_store;
 
         auto t0 = std::chrono::steady_clock::now();
-        auto cr = lithe::execution::compile(phys, req, &s_native_store);
+        auto prepared = lithe::execution::prepare_observed<Observer>(
+            phys, req, &s_native_store, unit_id);
         auto t1 = std::chrono::steady_clock::now();
-        res.stats.execute_ns = static_cast<std::int64_t>(
+        stats.execute_ns = static_cast<std::int64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()
         );
 
-        res.fallback_fired = cr.fallback_fired;
-        res.stats.fallback_used = cr.fallback_fired;
+        return prepared_native_execution{std::move(prepared), stats};
+    }
 
-        for (const auto& d : cr.diagnostics) {
+    [[nodiscard]] inline crank_execute_result
+    execute_physical_native(const lithe::codegen::mir::physical_mir_function& phys,
+                            const std::vector<std::int64_t>& args = {},
+                            execute_options opts = {}) {
+        auto prepared = prepare_physical_native(phys, opts);
+        crank_execute_result res;
+        res.stats = prepared.preparation_stats();
+        res.fallback_fired = prepared.fallback_fired();
+        res.stats.fallback_used = res.fallback_fired;
+
+        for (const auto& d : prepared.compilation().diagnostics) {
             if (detail::is_nonfatal_interp_note(d)) res.notes.push_back(d);
             else res.diagnostics.push_back(d);
         }
 
         const std::span<const std::int64_t> arg_span{args};
-        res.return_value = lithe::execution::invoke(cr, arg_span);
+        res.return_value = prepared.invoke(arg_span);
 
         return res;
     }

@@ -114,6 +114,7 @@
 #include "languages/crank/resolve.hpp"
 #include "lithe/backends/lithe_codegen_simd.hpp"
 #include "vakya/vakya.hpp"
+#include "observability/sinks/ring_buffer_sink.hpp"
 #include "utils/profiler.hpp"
 
 struct Vec3 {
@@ -1680,6 +1681,11 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
         // The Crank loop carries its accumulator through the structured region;
         // both sides return the identical Gaussian sum.
         constexpr std::int64_t kSumN = 100'000;
+        using phase_sink = utils::nadi::RingBufferSink<64>;
+        using phase_observer = lang::telemetry::phase_observer<
+            phase_sink, lang::telemetry::nadi_feedback<phase_sink>>;
+        constexpr std::uint64_t kSumUnitId = 0x4352'414E'4B40'0003ULL;
+        phase_sink::warmup();
 
         const auto make_sum_input = [] {
             lower_input inp;
@@ -1696,7 +1702,7 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             return inp;
         };
 
-        auto sum_hl = lower_to_hl(make_sum_input());
+        auto sum_hl = lower_to_hl_observed<phase_observer>(make_sum_input(), kSumUnitId);
         if (!sum_hl.ok()) return testfw::fail("ex40: lower sum_loop failed");
 
         cfg.label = "sum_cpp_100k";
@@ -1709,7 +1715,7 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
 
         // Phase 1 (once): lower HL MIR → physical MIR. Timed separately so the
         // execute-only benchmark below does not pay lowering cost per iteration.
-        auto sum_lp = lower_to_physical(sum_hl);
+        auto sum_lp = lower_to_physical_observed<phase_observer>(sum_hl, kSumUnitId);
         if (!sum_lp.ok()) return testfw::fail("ex40: lower_to_physical sum_loop failed");
 
         // Warm the native artifact once.  Timed native samples below therefore
@@ -1717,19 +1723,21 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
         // conflating first-use compilation with execution.  Keep the fallback
         // visible: an interpreter result must never be presented as a JIT result.
         const std::int64_t expected_sum = kSumN * (kSumN + 1) / 2;
-        const auto sum_jit_probe = execute_physical(
-            *sum_lp.phys, {}, {.path = execute_options::execution_path::native_only});
-        if (!sum_jit_probe.return_value || *sum_jit_probe.return_value != expected_sum)
+        const auto sum_jit_prepared = prepare_physical_native<phase_observer>(
+            *sum_lp.phys, {}, kSumUnitId);
+        const auto sum_jit_entry = sum_jit_prepared.native_entry();
+        const auto sum_jit_probe = sum_jit_prepared.invoke_observed<phase_observer>(
+            {}, kSumUnitId);
+        if (!sum_jit_probe || *sum_jit_probe != expected_sum)
             return testfw::fail("ex40: native JIT sum result mismatch");
-        const bool sum_jit_available = !sum_jit_probe.fallback_fired;
-        const auto sum_phys_stats = sum_jit_probe.stats;
+        const bool sum_jit_available = !sum_jit_prepared.fallback_fired()
+            && sum_jit_entry != nullptr;
+        const auto sum_phys_stats = sum_jit_prepared.preparation_stats();
 
         if (sum_jit_available) {
             cfg.label = "sum_crank_jit_100k";
-            auto sum_crank_jit = profiler::measure(cfg, [&]() {
-                const auto run = execute_physical(
-                    *sum_lp.phys, {}, {.path = execute_options::execution_path::native_only});
-                return run.return_value.value_or(-1);
+            auto sum_crank_jit = profiler::measure(cfg, [sum_jit_entry]() {
+                return sum_jit_entry(0, 0);
             });
             if (sum_crank_jit.return_values.empty()
                 || sum_crank_jit.return_values[0] != expected_sum)
@@ -1737,7 +1745,7 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             log_equivalent_benchmark(
                 "crank ex40 bench3 (cached native JIT)",
                 "Integer sum over the range 1 through 100,000",
-                "Both samples compute the same loop-carried integer reduction; JIT compilation was warmed before timing.",
+                "Both samples compute the same loop-carried integer reduction; timing calls the prepared native entry directly.",
                 sum_cpp.profile, sum_crank_jit.profile,
                 profiler::execution_mechanism::native_jit);
         } else {
@@ -1772,9 +1780,10 @@ fn compute_all(n_fact: Int32, n_fib: Int32, n_pi: Int32) {
             || sum_crank_full.return_values[0] != expected_sum)
             return testfw::fail("ex40: physical MIR sum result mismatch");
         lg::info("crank ex40 bench3: sum(1..{}) result={} across native and value-carrying MIR\n"
-                 "  physical-MIR lowering once: {:.2f} us; instrs={}; blocks={}",
+                 "  physical-MIR lowering once: {:.2f} us; instrs={}; blocks={}; Nadi phase events={}",
                  kSumN, expected_sum, static_cast<double>(sum_lp.lower_ns) / 1000.0,
-                 sum_phys_stats.instr_count, sum_phys_stats.block_count);
+                 sum_phys_stats.instr_count, sum_phys_stats.block_count,
+                 phase_sink::instance().size());
         log_equivalent_benchmark(
             "crank ex40 bench3 (cached value-carrying physical MIR)",
             "Integer sum over the range 1 through 100,000",

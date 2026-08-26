@@ -1549,6 +1549,14 @@ Entry points (`include/lithe/lithe_execution/compile.hpp`, namespace `lithe::exe
 - `compile(phys, req)` → `compile_result` — converged single entry: plan → emit → cache.
 - `invoke(result, args)` → `optional<int64>` — calls native handle or reads interpreter metadata.
 - `artifact_store` — in-process fingerprint → `compile_result` cache.
+- `prepare(phys, req, store)` → `prepared_execution` — retains the selected artifact after one planning/cache step.
+  `prepared_execution::native_entry()` exposes a non-owning typed i64 entry for a hot loop; the prepared object retains
+  artifact ownership for the entry's lifetime.
+- `compile_observed<Observer>` / `prepare_observed<Observer>` and
+  `prepared_execution::invoke_observed<Observer>` instrument backend compilation and execution. `Observer` is a
+  static policy from `languages/generic/observability/phase.hpp`: it may route fixed-size phase metrics to Nadi and/or
+  a feedback sink. The default observer is an empty no-op type, so normal Lithe calls do not read clocks, allocate,
+  mutate trace state, or branch for telemetry.
 - **crank frontend entry:** `execute_planned` (`languages/crank/plan.hpp` + `execute.hpp`); crank's planner (
   `construct_plan`) supplies intent (`execution_hint`) and force policy; lithe emits/caches (L-1 §4.5). Callers that
   want the explicit interpreter path use `execute_via_interpreter` / `execute_physical`.
@@ -1563,6 +1571,13 @@ Crank execution-path note (`include/languages/crank/execute.hpp`):
 - `execute_via_interpreter` remains strictly interpreter-only for callers that need deterministic fallback behavior.
 - `execute_physical_native` uses a digest-keyed in-process artifact cache so repeated calls of equivalent physical MIR
   reuse the compiled native artifact.
+- `prepare_physical_native` returns Crank's owning `prepared_native_execution`; its `native_entry()` is the zero-extra-
+  work hot path after preparation, while `invoke()` retains a safe fallback-aware interface.
+- `prepare_physical_native<Observer>` and `prepared_native_execution::invoke_observed<Observer>` preserve the same
+  ownership and fallback semantics while emitting the shared `backend_compile` and `execute` phase records.
+- Crank additionally provides `lower_to_hl_observed<Observer>` and `lower_to_physical_observed<Observer>` for the
+  generic-IR and physical-lowering boundaries. The migrated benchmark demonstrates all four phases with a bounded,
+  overwrite-oldest Nadi ring sink and a separate feedback route.
 
 **Status.** crank's `execute`/`aot` layer previously lowered + verified then ran the
 interpreter, caching only a fingerprint (not native code). As of this implementation,

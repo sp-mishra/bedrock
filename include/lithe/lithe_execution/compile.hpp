@@ -31,6 +31,7 @@
 #include "../backends/lithe_codegen_backend_registry.hpp"
 #include "../backends/lithe_codegen_interpreter.hpp"
 #include "../lithe_exec/exec_hint.hpp"
+#include "languages/generic/observability/phase.hpp"
 #if defined(LITHE_HAS_ASMJIT)
 #  include "../backends/lithe_codegen_asmjit.hpp"
 #endif
@@ -380,6 +381,26 @@ namespace lithe::execution {
         return res;
     }
 
+    // Opt-in compile instrumentation.  The default Observer instantiates an
+    // empty scope; callers select a Nadi and/or feedback policy explicitly.
+    template <class Observer = ::lang::telemetry::phase_observer<>>
+    [[nodiscard]] inline compile_result
+    compile_observed(const lithe::codegen::mir::physical_mir_function& phys,
+                     const compile_request& req,
+                     artifact_store* store = nullptr,
+                     const std::uint64_t unit_id = 0) noexcept {
+        ::lang::telemetry::phase_scope<Observer> scope{{
+            .unit_id = unit_id,
+            .stage = ::lang::telemetry::phase::backend_compile,
+        }};
+        auto result = compile(phys, req, store);
+        scope.set_outcome(result.fallback_fired
+            ? ::lang::telemetry::phase_outcome::fallback
+            : (result.ok() ? ::lang::telemetry::phase_outcome::success
+                           : ::lang::telemetry::phase_outcome::failed));
+        return result;
+    }
+
     // =============================================================================
     // invoke() — run a compile_result, return optional scalar
     //
@@ -421,5 +442,86 @@ namespace lithe::execution {
         }
 
         return std::nullopt;
+    }
+
+    // =============================================================================
+    // prepared_execution — compile once, invoke without planning or cache lookup
+    //
+    // Owns the compile result, and therefore the resident native artifact.  The
+    // typed entry is intentionally exposed only as a non-owning function pointer:
+    // the prepared_execution must outlive calls through it.  This keeps native
+    // ownership local while allowing a hot caller to pay only its ABI boundary.
+    // =============================================================================
+
+    class prepared_execution {
+    public:
+        using native_i64_entry = std::int64_t (*)(std::int64_t, std::int64_t);
+
+        explicit prepared_execution(compile_result result) noexcept
+            : result_(std::move(result)) {}
+
+        [[nodiscard]] bool is_native() const noexcept { return result_.is_native(); }
+        [[nodiscard]] bool used_fallback() const noexcept { return result_.fallback_fired; }
+        [[nodiscard]] const compile_result& result() const noexcept { return result_; }
+
+        // Returns nullptr unless the selected artifact is a valid i64 native entry.
+        // Callers that retain this pointer must retain *this for at least as long.
+        [[nodiscard]] native_i64_entry native_entry() const noexcept {
+#if defined(LITHE_HAS_ASMJIT)
+            if (!result_.is_native()) return nullptr;
+            const auto* handle = result_.artifact.handle->get<
+                lithe::codegen::backends::jit_function_handle>();
+            return handle && handle->valid() && !handle->returns_f64()
+                ? handle->fn_ptr
+                : nullptr;
+#else
+            return nullptr;
+#endif
+        }
+
+        [[nodiscard]] std::optional<std::int64_t>
+        invoke(const std::span<const std::int64_t> args = {}) const noexcept {
+            const auto entry = native_entry();
+            if (entry != nullptr) {
+                const std::int64_t a = args.size() >= 1 ? args[0] : 0;
+                const std::int64_t b = args.size() >= 2 ? args[1] : 0;
+                return entry(a, b);
+            }
+            return lithe::execution::invoke(result_, args);
+        }
+
+        template <class Observer = ::lang::telemetry::phase_observer<>>
+        [[nodiscard]] std::optional<std::int64_t>
+        invoke_observed(const std::span<const std::int64_t> args = {},
+                        const std::uint64_t unit_id = 0) const noexcept {
+            ::lang::telemetry::phase_scope<Observer> scope{{
+                .unit_id = unit_id,
+                .stage = ::lang::telemetry::phase::execute,
+            }};
+            auto value = invoke(args);
+            scope.set_outcome(value.has_value()
+                ? ::lang::telemetry::phase_outcome::success
+                : ::lang::telemetry::phase_outcome::failed);
+            return value;
+        }
+
+    private:
+        compile_result result_;
+    };
+
+    [[nodiscard]] inline prepared_execution
+    prepare(const lithe::codegen::mir::physical_mir_function& phys,
+            const compile_request& req = {},
+            artifact_store* store = nullptr) noexcept {
+        return prepared_execution{compile(phys, req, store)};
+    }
+
+    template <class Observer = ::lang::telemetry::phase_observer<>>
+    [[nodiscard]] inline prepared_execution
+    prepare_observed(const lithe::codegen::mir::physical_mir_function& phys,
+                     const compile_request& req = {},
+                     artifact_store* store = nullptr,
+                     const std::uint64_t unit_id = 0) noexcept {
+        return prepared_execution{compile_observed<Observer>(phys, req, store, unit_id)};
     }
 } // namespace lithe::execution

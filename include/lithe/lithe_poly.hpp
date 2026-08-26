@@ -172,86 +172,99 @@ namespace lithe::poly {
                     continue;
                 }
 
-                // (a) Induction variable detection: x = x ± imm in header.
-                for (const auto& instr : hdr->instructions) {
-                    if (instr.op != codegen::opcode::add &&
-                        instr.op != codegen::opcode::sub)
-                        continue;
-                    if (instr.defs.size() != 1) continue;
-                    if (instr.defs[0].type != codegen::allocated_operand::kind::preg) continue;
+                // (a) Induction variable detection: x = x ± imm in the header
+                // or a natural-loop latch. Structured lowering keeps the header
+                // side-effect free (compare/branch) and performs the increment in
+                // the latch, while older flat MIR may still increment in-header.
+                std::vector<const codegen::allocated_basic_block*> iv_blocks{hdr};
+                for (const auto& edge : li.back_edges) {
+                    if (const auto it = block_ptr.find(edge.from);
+                        it != block_ptr.end() && it->second != hdr)
+                        iv_blocks.push_back(it->second);
+                }
 
-                    const auto& dst = std::get<codegen::preg>(instr.defs[0].value);
-                    const codegen::preg* src_reg = nullptr;
-                    std::int64_t step_val = 0;
-                    bool has_imm = false;
+                for (const auto* iv_block : iv_blocks) {
+                    for (const auto& instr : iv_block->instructions) {
+                        if (instr.op != codegen::opcode::add &&
+                            instr.op != codegen::opcode::sub)
+                            continue;
+                        if (instr.defs.size() != 1) continue;
+                        if (instr.defs[0].type != codegen::allocated_operand::kind::preg) continue;
 
-                    for (const auto& u : instr.uses) {
-                        if (u.type == codegen::allocated_operand::kind::preg)
-                            src_reg = &std::get<codegen::preg>(u.value);
-                        else if (u.type == codegen::allocated_operand::kind::immediate_i64) {
-                            step_val = std::get<std::int64_t>(u.value);
-                            has_imm = true;
-                        }
-                    }
+                        const auto& dst = std::get<codegen::preg>(instr.defs[0].value);
+                        const codegen::preg* src_reg = nullptr;
+                        std::int64_t step_val = 0;
+                        bool has_imm = false;
 
-                    if (!src_reg || !has_imm || dst.id != src_reg->id) continue;
-
-                    const int step_signed = (instr.op == codegen::opcode::sub)
-                                                ? -static_cast<int>(step_val)
-                                                : static_cast<int>(step_val);
-
-                    loop_induction_var iv;
-                    iv.preg_id = dst.id;
-                    iv.def_instr_id = instr.id;
-                    iv.bounds.induction_preg_id = dst.id;
-                    iv.bounds.step = step_signed;
-                    iv.bounds.step_known = true;
-
-                    // (b) Lower bound: scan all blocks for a load_imm defining this
-                    // preg outside the loop body (def_use_chains only keeps the last
-                    // definition, which is the increment inside the loop itself).
-                    for (const auto& blk : fn.function.blocks) {
-                        if (li.body.contains(blk.id)) continue;
-                        for (const auto& di : blk.instructions) {
-                            if (di.op != codegen::opcode::load_imm) continue;
-                            bool defines_iv = false;
-                            for (const auto& def_op : di.defs) {
-                                if (def_op.type == codegen::allocated_operand::kind::preg &&
-                                    std::get<codegen::preg>(def_op.value).id == dst.id) {
-                                    defines_iv = true;
-                                    break;
-                                }
+                        for (const auto& u : instr.uses) {
+                            if (u.type == codegen::allocated_operand::kind::preg)
+                                src_reg = &std::get<codegen::preg>(u.value);
+                            else if (u.type == codegen::allocated_operand::kind::immediate_i64) {
+                                step_val = std::get<std::int64_t>(u.value);
+                                has_imm = true;
                             }
-                            if (!defines_iv) continue;
-                            for (const auto& u : di.uses) {
-                                if (u.type == codegen::allocated_operand::kind::immediate_i64) {
-                                    iv.bounds.lower = static_cast<int>(std::get<std::int64_t>(u.value));
-                                    iv.bounds.lower_known = true;
+                        }
+
+                        if (!src_reg || !has_imm || dst.id != src_reg->id) continue;
+
+                        const int step_signed = (instr.op == codegen::opcode::sub)
+                                                    ? -static_cast<int>(step_val)
+                                                    : static_cast<int>(step_val);
+                        if (step_signed == 0) continue;
+
+                        loop_induction_var iv;
+                        iv.preg_id = dst.id;
+                        iv.def_instr_id = instr.id;
+                        iv.bounds.induction_preg_id = dst.id;
+                        iv.bounds.step = step_signed;
+                        iv.bounds.step_known = true;
+
+                        // (b) Lower bound: scan all blocks for a load_imm defining this
+                        // preg outside the loop body (def_use_chains only keeps the last
+                        // definition, which is the increment inside the loop itself).
+                        for (const auto& blk : fn.function.blocks) {
+                            if (li.body.contains(blk.id)) continue;
+                            for (const auto& di : blk.instructions) {
+                                if (di.op != codegen::opcode::load_imm) continue;
+                                bool defines_iv = false;
+                                for (const auto& def_op : di.defs) {
+                                    if (def_op.type == codegen::allocated_operand::kind::preg &&
+                                        std::get<codegen::preg>(def_op.value).id == dst.id) {
+                                        defines_iv = true;
+                                        break;
+                                    }
                                 }
+                                if (!defines_iv) continue;
+                                for (const auto& u : di.uses) {
+                                    if (u.type == codegen::allocated_operand::kind::immediate_i64) {
+                                        iv.bounds.lower = static_cast<int>(std::get<std::int64_t>(u.value));
+                                        iv.bounds.lower_known = true;
+                                    }
+                                }
+                                break;
+                            }
+                            if (iv.bounds.lower_known) break;
+                        }
+
+                        // Upper bound: cmp_lt/cmp_le in header with this IV and an imm.
+                        for (const auto& ci : hdr->instructions) {
+                            if (ci.op != codegen::opcode::cmp_lt &&
+                                ci.op != codegen::opcode::cmp_le)
+                                continue;
+                            if (ci.uses.size() < 2) continue;
+                            if (ci.uses[0].type != codegen::allocated_operand::kind::preg) continue;
+                            if (std::get<codegen::preg>(ci.uses[0].value).id != dst.id) continue;
+                            if (ci.uses[1].type == codegen::allocated_operand::kind::immediate_i64) {
+                                int bound = static_cast<int>(std::get<std::int64_t>(ci.uses[1].value));
+                                if (ci.op == codegen::opcode::cmp_le) ++bound;
+                                iv.bounds.upper = bound;
+                                iv.bounds.upper_known = true;
                             }
                             break;
                         }
-                        if (iv.bounds.lower_known) break;
-                    }
 
-                    // Upper bound: cmp_lt/cmp_le in header with this IV and an imm.
-                    for (const auto& ci : hdr->instructions) {
-                        if (ci.op != codegen::opcode::cmp_lt &&
-                            ci.op != codegen::opcode::cmp_le)
-                            continue;
-                        if (ci.uses.size() < 2) continue;
-                        if (ci.uses[0].type != codegen::allocated_operand::kind::preg) continue;
-                        if (std::get<codegen::preg>(ci.uses[0].value).id != dst.id) continue;
-                        if (ci.uses[1].type == codegen::allocated_operand::kind::immediate_i64) {
-                            int bound = static_cast<int>(std::get<std::int64_t>(ci.uses[1].value));
-                            if (ci.op == codegen::opcode::cmp_le) ++bound;
-                            iv.bounds.upper = bound;
-                            iv.bounds.upper_known = true;
-                        }
-                        break;
+                        pl.ivars.push_back(iv);
                     }
-
-                    pl.ivars.push_back(iv);
                 }
 
                 // (c) Build iteration domain matrix.

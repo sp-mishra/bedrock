@@ -44,6 +44,7 @@
 #include "lithe/lithe_exec/exec_hint.hpp"
 #include "languages/crank/safety.hpp"
 #include "languages/crank/source_span.hpp"
+#include "languages/generic/observability/phase.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -1428,5 +1429,22 @@ namespace crank {
             std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
 
         return res;
+    }
+
+    template <class Observer = ::lang::telemetry::phase_observer<>>
+    [[nodiscard]] inline lower_hl_result
+    lower_to_hl_observed(lower_input inp, const std::uint64_t unit_id = 0) {
+        ::lang::telemetry::phase_scope<Observer> scope{{
+            .unit_id = unit_id,
+            .stage = ::lang::telemetry::phase::generic_ir_lower,
+        }};
+        auto result = lower_to_hl(std::move(inp));
+        scope.set_transformations(result.stats.int_op_count
+            + result.stats.guard_count
+            + result.stats.cleanup_region_count
+            + result.stats.tx_region_count);
+        scope.set_outcome(result.ok() ? ::lang::telemetry::phase_outcome::success
+                                      : ::lang::telemetry::phase_outcome::failed);
+        return result;
     }
 } // namespace crank
