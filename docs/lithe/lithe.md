@@ -77,6 +77,11 @@ host tensor views, records region dependencies in the Pebble graph, runs
 HL-MIR fusion before Lithe device-plan extraction, and invokes the Metal
 executor. Crank retains host-buffer ownership; Lithe retains only non-owning
 plans; Metal tensors and submissions are temporary execution state.
+Before a Crank pipeline dispatches, it conservatively admits the complete
+resident tensor set against `auto_execution_policy::max_device_cache_bytes`.
+An over-budget chain fails before any device write with
+`gpu_dispatch_status::resource_exhausted`, so the frontend can safely choose
+its scalar or SIMD fallback.
 
 Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
 added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.

@@ -303,3 +303,25 @@ TEST_CASE (
     const auto invalid = pipeline.add_binary_region({});
     REQUIRE_FALSE(invalid.has_value());
 }
+
+TEST_CASE (
+
+"Crank GPU pipeline estimates its retained Metal tensor budget"
+,
+"[crank][gpu_memory][metal][pipeline]"
+)
+ {
+    lithe::codegen::hl::hl_mir_function function{1024};
+    std::vector<float> lhs(16), rhs(16), output(16);
+    crank_gpu_pipeline pipeline;
+    const auto node = pipeline.add_binary_region({
+        .function = std::addressof(function),
+        .inputs = {
+            gpu_metal_input_binding::from_host(lhs),
+            gpu_metal_input_binding::from_host(rhs),
+        },
+        .output = {.values = output},
+    });
+    REQUIRE(node.has_value());
+    REQUIRE(pipeline.estimated_device_bytes() == 3 * lhs.size() * sizeof(float));
+}

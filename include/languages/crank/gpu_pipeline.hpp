@@ -13,6 +13,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace crank {
@@ -83,6 +84,13 @@ namespace crank {
         [[nodiscard]] std::expected<gpu_metal_execution_summary, gpu_dispatch_result>
         execute_observed(const lithe::exec::auto_execution_policy& policy = {},
                          const std::uint64_t unit_id = 0) {
+            const auto resident_bytes = estimated_device_bytes();
+            if (resident_bytes > policy.max_device_cache_bytes)
+                return std::unexpected(gpu_dispatch_result{
+                    gpu_dispatch_status::resource_exhausted,
+                    "crank gpu: device-resident chain requires " + std::to_string(resident_bytes)
+                        + " bytes, exceeding the configured "
+                        + std::to_string(policy.max_device_cache_bytes) + " byte budget"});
             std::vector<lithe::codegen::device::kernel_plan> plans;
             plans.reserve(regions_.size());
             for (auto& region : regions_) {
@@ -119,6 +127,28 @@ namespace crank {
         }
 
         [[nodiscard]] bool empty() const noexcept { return regions_.empty(); }
+
+        // Conservative peak: the executor retains each distinct host input and
+        // each graph output through submission completion. A rejected chain is
+        // therefore safe to send to the caller's scalar/SIMD fallback before
+        // any visible device write occurs.
+        [[nodiscard]] std::uint64_t estimated_device_bytes() const {
+            std::uint64_t bytes = 0;
+            std::vector<std::pair<const float*, std::size_t>> host_inputs;
+            host_inputs.reserve(regions_.size() * 2);
+            for (const auto& entry : regions_) {
+                for (const auto& input : entry.region.inputs) {
+                    if (input.producer || input.host.empty()) continue;
+                    const auto found = std::ranges::find(host_inputs, input.host.data(),
+                                                         &std::pair<const float*, std::size_t>::first);
+                    if (found != host_inputs.end() && found->second == input.host.size()) continue;
+                    host_inputs.emplace_back(input.host.data(), input.host.size());
+                    bytes += input.host.size() * sizeof(float);
+                }
+                bytes += entry.count * sizeof(float);
+            }
+            return bytes;
+        }
 
     private:
         struct stored_region {

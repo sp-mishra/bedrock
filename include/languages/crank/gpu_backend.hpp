@@ -250,6 +250,7 @@ namespace crank {
         ok, // dispatched on device
         unsupported_shape, // kernel shape not one the emitter handles
         no_device, // Vulkan not compiled in, or no device available
+        resource_exhausted, // selected device path exceeds its configured resource budget
     };
 
     [[nodiscard]] constexpr std::string_view to_string(gpu_dispatch_status s) noexcept {
@@ -257,6 +258,7 @@ namespace crank {
         case gpu_dispatch_status::ok: return "ok";
         case gpu_dispatch_status::unsupported_shape: return "unsupported_shape";
         case gpu_dispatch_status::no_device: return "no_device";
+        case gpu_dispatch_status::resource_exhausted: return "resource_exhausted";
         }
         return "unknown";
     }
