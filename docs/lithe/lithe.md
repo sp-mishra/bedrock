@@ -27,6 +27,10 @@ Consumers that call this native path link `bedrock::lithe_metal`; the stable
 API remains `lithe::codegen::backends::metal_backend` and does not expose
 Metal-C++ types.
 
+The Crank GPU example constructs the shared HL-MIR plan, selects Metal first
+on macOS, and verifies the dispatched f32 add result. Its SPIR-V check remains
+a portability probe; it is not used to decide native Metal availability.
+
 Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
 added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.
 
@@ -334,7 +338,7 @@ subsystem follows in the sections below; this is the consolidated index.)
 | Loop analysis | Polyhedral model: affine-matrix domains, loop extract / fusion / interchange | `lithe_poly.hpp` |
 | Backend selection | Cost-based selector (10-step gate) + selector strategies: cost_based / profile_guided / rule_based / learned | `lithe_selector_strategy.hpp`, `lithe_decision_engine.hpp` |
 | Cost modeling | Unified cost-model framework; adaptive/profile-guided cost refinement | `lithe_algorithms.hpp`, `lithe_pgo.hpp` |
-| Backends | 7 codegen backends: debug_text · interpreter · text assembler · asmjit JIT · SIMD (Highway) · Vulkan (SPIR-V) · null | `include/lithe/backends/` |
+| Backends | 8 codegen backends: debug_text · interpreter · text assembler · asmjit JIT · SIMD (Highway) · native Metal · Vulkan (SPIR-V) · null | `include/lithe/backends/` |
 | Backend registry | Generational-handle + slot_map registry with shared-lock acquire protocol | `lithe_execution/registry.hpp` |
 | Feature extraction | Static feature extraction + feature store for ML-guided selection | `lithe_feature_extractor.hpp`, `lithe_feedback.hpp` |
 | Safepoints | Safepoint + stack-map injection for managed runtime | `lithe_safepoint.hpp` |
@@ -1520,7 +1524,7 @@ Backend → mode mapping:
   dispatch loop.
 - `asmjit_backend` (`lithe_codegen_asmjit.hpp`) = CPU codegen emitter (x64/AArch64) → `jit_function_handle`. Serves BOTH
   JIT (run now) and AOT (serialize + reload).
-- Vulkan/Metal (`lithe_codegen_vulkan.hpp`) = GPU codegen. Its own JIT (runtime kernel build) + AOT (cached kernel
+- Vulkan (`lithe_codegen_vulkan.hpp`) and native Metal (`lithe_codegen_metal.hpp`) = GPU codegen. Their own JIT (runtime kernel build) + AOT (cached kernel
   binary).
 - `execution_engine<Policy>` (`lithe_codegen_interpreter.hpp`) = policy dispatcher that selects a backend and applies
   the fallback rule.

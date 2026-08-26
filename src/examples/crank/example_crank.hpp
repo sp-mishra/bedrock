@@ -1265,7 +1265,7 @@ fn scale(xs: []Float32) -> []Float32 {
     }
 
     // ────────────────────────────────────────────────────────────────────────────
-    // ex36: GPU elementwise — lower → SPIR-V emit → dispatch (device or CPU fallback).
+    // ex36: GPU elementwise — shared HL-MIR plan → native Metal or Vulkan/MoltenVK.
     // ────────────────────────────────────────────────────────────────────────────
     static testfw::Result ex36_e2e_gpu_elementwise() {
         using namespace crank;
@@ -1290,29 +1290,126 @@ fn add_vec(xs: []Float32) -> []Float32 {
         const auto hl = lower_to_hl(std::move(inp));
         if (!hl.ok()) return testfw::fail("ex36: lower_to_hl failed");
 
-        // Backend: emit + validate the SPIR-V elementwise-add kernel (always available,
-        // no device required), then attempt dispatch. When no Vulkan device is present
-        // the backend honestly reports no_device so the planner can fall back.
+        // Keep the portable SPIR-V validation probe: it exercises the fallback
+        // provider's code-generation contract without requiring a Vulkan device.
         const gpu_backend gpu;
         auto module = gpu.compile_elementwise(gpu_elementwise_op::add);
         if (module.validate() != lithe::ir::ir_resolution_state::resolved)
             return testfw::fail("ex36: emitted SPIR-V failed validation");
 
-        const auto dispatch = gpu.install(gpu_elementwise_op::add);
+        // Build the same backend-neutral HL-MIR kernel that the Metal and Vulkan
+        // providers consume.  The plan remains a non-owning view of this function;
+        // no second device IR is introduced.
+        constexpr std::size_t n = 4096;
+        lithe::codegen::hl::hl_mir_function kernel{1u << 16};
+        kernel.name = "crank_add_vec";
+
+        const auto set_operands = [&kernel](auto* op, std::initializer_list<lithe::codegen::ssa_value_id> values) {
+            auto span = kernel.template alloc_span<lithe::codegen::ssa_value_id>(values.size());
+            std::ranges::copy(values, span.begin());
+            op->operands = span;
+        };
+        const auto set_results = [&kernel](auto* op, std::initializer_list<lithe::codegen::ssa_value_id> values) {
+            auto span = kernel.template alloc_span<lithe::codegen::ssa_value_id>(values.size());
+            std::ranges::copy(values, span.begin());
+            op->results = span;
+        };
+        const auto make_view = [] {
+            std::array<std::int64_t, lithe::codegen::hl::memref_type::max_rank> shape{};
+            shape[0] = static_cast<std::int64_t>(n);
+            return lithe::codegen::hl::memref_type::row_major(
+                lithe::codegen::abstract_value_kind::floating, 32, 1, shape);
+        };
+
+        auto* entry = kernel.make_block();
+        kernel.body_region.blocks.push_back(entry);
+        entry->parent_region = &kernel.body_region;
+
+        auto* loop = kernel.make_op(lithe::codegen::hl::hl_opcode::structured_for);
+        lithe::codegen::hl::structured_for_attr loop_attr;
+        loop_attr.rank = 1;
+        loop_attr.is_parallel = true;
+        loop_attr.bounds[0] = {0, static_cast<int>(n), 1, true, true, true};
+        loop_attr.bounds_known = true;
+        loop_attr.trip_count_hint = n;
+        loop->attr = loop_attr;
+
+        auto* body = kernel.make_region();
+        auto regions = kernel.alloc_span<lithe::codegen::hl::hl_region*>(1);
+        regions[0] = body;
+        loop->regions = regions;
+        body->parent_op = loop;
+        auto* body_block = kernel.make_block();
+        body->blocks.push_back(body_block);
+        body_block->parent_region = body;
+
+        constexpr lithe::codegen::ssa_value_id index{1};
+        constexpr lithe::codegen::ssa_value_id lhs_base{10};
+        constexpr lithe::codegen::ssa_value_id rhs_base{11};
+        constexpr lithe::codegen::ssa_value_id out_base{12};
+        constexpr lithe::codegen::ssa_value_id lhs_value{20};
+        constexpr lithe::codegen::ssa_value_id rhs_value{21};
+        constexpr lithe::codegen::ssa_value_id sum_value{22};
+
+        auto* loop_index = kernel.make_op(lithe::codegen::hl::hl_opcode::loop_index);
+        set_results(loop_index, {index});
+        body_block->ops.push_back(loop_index);
+
+        const auto add_load = [&](const lithe::codegen::ssa_value_id base,
+                                  const lithe::codegen::ssa_value_id result) {
+            auto* load = kernel.make_op(lithe::codegen::hl::hl_opcode::memref_load);
+            load->attr = lithe::codegen::hl::memref_attr{.view = make_view(), .base_operand_index = 0};
+            set_operands(load, {base, index});
+            set_results(load, {result});
+            body_block->ops.push_back(load);
+        };
+        add_load(lhs_base, lhs_value);
+        add_load(rhs_base, rhs_value);
+
+        auto* add = kernel.make_op(lithe::codegen::hl::hl_opcode::fadd);
+        set_operands(add, {lhs_value, rhs_value});
+        set_results(add, {sum_value});
+        body_block->ops.push_back(add);
+
+        auto* store = kernel.make_op(lithe::codegen::hl::hl_opcode::memref_store);
+        store->attr = lithe::codegen::hl::memref_attr{.view = make_view(), .base_operand_index = 0};
+        set_operands(store, {out_base, sum_value, index});
+        body_block->ops.push_back(store);
+        body_block->ops.push_back(kernel.make_op(lithe::codegen::hl::hl_opcode::region_yield));
+        entry->ops.push_back(loop);
+
+        const auto plan = lithe::codegen::device::analyze_kernel(kernel);
+        if (!plan.valid() || !gpu.supports(plan))
+            return testfw::fail("ex36: shared HL-MIR device plan is invalid");
+
+        std::vector<float> lhs(n, 1.0f), rhs(n, 2.0f), out(n);
+        const auto dispatch = gpu.preferred_provider() == gpu_provider::metal
+            ? gpu.dispatch_metal(plan, out, lhs, rhs)
+            : gpu.install(plan, gpu_elementwise_op::add);
         const bool dispatched = dispatch.ok();
         if (!dispatched && dispatch.status != gpu_dispatch_status::no_device)
             return testfw::fail("ex36: unexpected GPU dispatch failure");
 
+        if (dispatched && gpu.preferred_provider() == gpu_provider::metal && out.front() != 3.0f)
+            return testfw::fail("ex36: native Metal add mismatch");
+
         // Fallback path: when the device is unavailable, produce the same result on
         // the SIMD backend so the program still yields a typed result.
         if (!dispatched) {
-            constexpr std::size_t n = 4096;
-            std::vector<float> a(n, 1.0f), b(n, 2.0f), out(n);
-            lithe::codegen::backends::simd_kernels::add(a, b, out);
+            lithe::codegen::backends::simd_kernels::add(lhs, rhs, out);
             if (out[0] != 3.0f) return testfw::fail("ex36: fallback add mismatch");
         }
 
-        lg::info("crank ex36 (e2e GPU): SPIR-V validated, available={}, dispatch={}",
+        const auto provider_name = [](const gpu_provider provider) constexpr -> std::string_view {
+            switch (provider) {
+            case gpu_provider::metal: return "metal";
+            case gpu_provider::vulkan: return "vulkan";
+            case gpu_provider::none: return "none";
+            }
+            return "unknown";
+        };
+        lg::info("crank ex36 (e2e GPU): SPIR-V validated, provider={}, available={}, dispatch={}",
+                 provider_name(gpu.preferred_provider()),
                  gpu_backend::available(), crank::to_string(dispatch.status));
         return {};
     }
