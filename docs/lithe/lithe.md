@@ -83,6 +83,12 @@ An over-budget chain fails before any device write with
 `gpu_dispatch_status::resource_exhausted`, so the frontend can safely choose
 its scalar or SIMD fallback.
 
+`languages/crank/tensor_runtime.hpp` provides the typed Crank entry point for
+such lowered binary f32 regions. `execute_f32_binary` attempts the pipeline
+first and invokes a statically-bound scalar/SIMD fallback only before GPU
+submission when the configured policy permits it. Scalar-only Crank users do
+not include this header or pay for the Metal path.
+
 Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
 added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.
 

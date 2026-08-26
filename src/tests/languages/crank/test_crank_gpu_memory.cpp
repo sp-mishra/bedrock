@@ -15,9 +15,13 @@
 #include "languages/crank/gpu_execution_graph.hpp"
 #include "languages/crank/gpu_metal_execution.hpp"
 #include "languages/crank/gpu_pipeline.hpp"
+#include "languages/crank/tensor_runtime.hpp"
 
+#include <array>
 #include <concepts>
+#include <ranges>
 #include <utility>
+#include <vector>
 
 using namespace crank;
 
@@ -28,6 +32,75 @@ namespace {
         b.access = access;
         b.residency = res;
         return b;
+    }
+
+    lithe::codegen::hl::hl_mir_function make_f32_add_kernel(const std::size_t count) {
+        namespace hl = lithe::codegen::hl;
+        using lithe::codegen::abstract_value_kind;
+        using lithe::codegen::ssa_value_id;
+
+        hl::hl_mir_function kernel{1u << 16};
+        const auto set_operands = [&kernel](auto* op, std::initializer_list<ssa_value_id> values) {
+            auto span = kernel.template alloc_span<ssa_value_id>(values.size());
+            std::ranges::copy(values, span.begin());
+            op->operands = span;
+        };
+        const auto set_results = [&kernel](auto* op, std::initializer_list<ssa_value_id> values) {
+            auto span = kernel.template alloc_span<ssa_value_id>(values.size());
+            std::ranges::copy(values, span.begin());
+            op->results = span;
+        };
+        const auto make_view = [count] {
+            std::array<std::int64_t, hl::memref_type::max_rank> shape{};
+            shape[0] = static_cast<std::int64_t>(count);
+            return hl::memref_type::row_major(abstract_value_kind::floating, 32, 1, shape);
+        };
+
+        auto* entry = kernel.make_block();
+        kernel.body_region.blocks.push_back(entry);
+        entry->parent_region = &kernel.body_region;
+        auto* loop = kernel.make_op(hl::hl_opcode::structured_for);
+        hl::structured_for_attr loop_attr;
+        loop_attr.rank = 1;
+        loop_attr.is_parallel = true;
+        loop_attr.bounds[0] = {0, static_cast<int>(count), 1, true, true, true};
+        loop_attr.bounds_known = true;
+        loop_attr.trip_count_hint = count;
+        loop->attr = loop_attr;
+        auto* body = kernel.make_region();
+        auto regions = kernel.alloc_span<hl::hl_region*>(1);
+        regions[0] = body;
+        loop->regions = regions;
+        body->parent_op = loop;
+        auto* body_block = kernel.make_block();
+        body->blocks.push_back(body_block);
+        body_block->parent_region = body;
+
+        constexpr ssa_value_id index{1}, lhs_base{10}, rhs_base{11}, out_base{12};
+        constexpr ssa_value_id lhs_value{20}, rhs_value{21}, sum_value{22};
+        auto* loop_index = kernel.make_op(hl::hl_opcode::loop_index);
+        set_results(loop_index, {index});
+        body_block->ops.push_back(loop_index);
+        const auto add_load = [&](const ssa_value_id base, const ssa_value_id result) {
+            auto* load = kernel.make_op(hl::hl_opcode::memref_load);
+            load->attr = hl::memref_attr{.view = make_view(), .base_operand_index = 0};
+            set_operands(load, {base, index});
+            set_results(load, {result});
+            body_block->ops.push_back(load);
+        };
+        add_load(lhs_base, lhs_value);
+        add_load(rhs_base, rhs_value);
+        auto* add = kernel.make_op(hl::hl_opcode::fadd);
+        set_operands(add, {lhs_value, rhs_value});
+        set_results(add, {sum_value});
+        body_block->ops.push_back(add);
+        auto* store = kernel.make_op(hl::hl_opcode::memref_store);
+        store->attr = hl::memref_attr{.view = make_view(), .base_operand_index = 0};
+        set_operands(store, {out_base, sum_value, index});
+        body_block->ops.push_back(store);
+        body_block->ops.push_back(kernel.make_op(hl::hl_opcode::region_yield));
+        entry->ops.push_back(loop);
+        return kernel;
     }
 } // namespace
 
@@ -324,4 +397,95 @@ TEST_CASE (
     });
     REQUIRE(node.has_value());
     REQUIRE(pipeline.estimated_device_bytes() == 3 * lhs.size() * sizeof(float));
+}
+
+TEST_CASE (
+
+"Crank f32 tensor runtime safely falls back before an unsupported GPU submission"
+,
+"[crank][gpu_memory][tensor_runtime]"
+)
+ {
+    lithe::codegen::hl::hl_mir_function unsupported{1024};
+    f32_tensor lhs{{1.0f, 2.0f, 3.0f}};
+    f32_tensor rhs{{4.0f, 5.0f, 6.0f}};
+    f32_tensor output{3};
+    const auto result = execute_f32_binary(
+        unsupported, lhs, rhs, output,
+        [](const std::span<const float> left, const std::span<const float> right,
+           const std::span<float> destination) noexcept {
+            for (std::size_t i = 0; i < destination.size(); ++i)
+                destination[i] = left[i] + right[i];
+        });
+    REQUIRE(result.has_value());
+    REQUIRE(result->fallback_fired);
+    REQUIRE_FALSE(result->used_gpu);
+    REQUIRE(output.values()[0] == 5.0f);
+    REQUIRE(output.values()[2] == 9.0f);
+}
+
+TEST_CASE (
+
+"Crank GPU pipeline rejects an over-budget chain before device submission"
+,
+"[crank][gpu_memory][tensor_runtime]"
+)
+ {
+    auto kernel = make_f32_add_kernel(16);
+    std::vector<float> lhs(16), rhs(16), output(16);
+    crank_gpu_pipeline pipeline;
+    REQUIRE(pipeline.add_binary_region({
+        .function = std::addressof(kernel),
+        .inputs = {
+            gpu_metal_input_binding::from_host(lhs),
+            gpu_metal_input_binding::from_host(rhs),
+        },
+        .output = {.values = output},
+    }).has_value());
+    lithe::exec::auto_execution_policy policy;
+    policy.max_device_cache_bytes = 1;
+    const auto result = pipeline.execute_observed(policy);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().status == gpu_dispatch_status::resource_exhausted);
+}
+
+TEST_CASE (
+
+"Crank GPU pipeline retains a Metal f32 intermediate and downloads only the terminal output"
+,
+"[crank][gpu_memory][metal][runtime]"
+)
+ {
+    if (gpu_backend::preferred_provider() != gpu_provider::metal) return;
+
+    constexpr std::size_t count = 8192;
+    auto first_kernel = make_f32_add_kernel(count);
+    auto second_kernel = make_f32_add_kernel(count);
+    std::vector<float> lhs(count, 1.0f), rhs(count, 2.0f), output(count);
+    crank_gpu_pipeline pipeline;
+    const auto first = pipeline.add_binary_region({
+        .function = std::addressof(first_kernel),
+        .inputs = {
+            gpu_metal_input_binding::from_host(lhs),
+            gpu_metal_input_binding::from_host(rhs),
+        },
+    });
+    REQUIRE(first.has_value());
+    const auto second = pipeline.add_binary_region({
+        .function = std::addressof(second_kernel),
+        .inputs = {
+            gpu_metal_input_binding::from_region(*first),
+            gpu_metal_input_binding::from_region(*first),
+        },
+        .output = {.values = output},
+    });
+    REQUIRE(second.has_value());
+
+    const auto result = pipeline.execute_observed();
+    REQUIRE(result.has_value());
+    REQUIRE(result->uploads == 2);
+    REQUIRE(result->downloads == 1);
+    REQUIRE(result->submissions == 2);
+    REQUIRE(output.front() == 6.0f);
+    REQUIRE(output.back() == 6.0f);
 }
