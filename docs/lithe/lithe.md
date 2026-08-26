@@ -31,6 +31,12 @@ The Crank GPU example constructs the shared HL-MIR plan, selects Metal first
 on macOS, and verifies the dispatched f32 add result. Its SPIR-V check remains
 a portability probe; it is not used to decide native Metal availability.
 
+Native Metal pipeline compilation is bounded and cached by semantic source
+identity through Pebble's Kosha cache. Repeated host/device workloads can use
+Pravaha's opt-in `metal_buffer_set<T, K>` to retain shared buffers and
+`metal_submission` to submit without immediately waiting. Neither facility is
+part of portable Lithe artifacts or required by a non-Metal consumer.
+
 Vulkan/MoltenVK remains an opt-in provider until its headers and loader are
 added to Bedrock. Highway SIMD and the interpreter remain portable fallbacks.
 

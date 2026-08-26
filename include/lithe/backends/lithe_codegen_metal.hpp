@@ -23,6 +23,15 @@ namespace lithe::codegen::backends {
     struct metal_runtime_error { std::string message; };
 
     namespace metal_detail {
+        [[nodiscard]] inline std::uint64_t source_cache_key(const std::string_view source,
+                                                             std::uint64_t seed) noexcept {
+            for (const auto ch : source) {
+                seed ^= static_cast<unsigned char>(ch);
+                seed *= 1099511628211ULL;
+            }
+            return seed;
+        }
+
         [[nodiscard]] inline std::string hl_value_name(const ssa_value_id value) {
             return "v_" + std::to_string(value.id);
         }
@@ -427,15 +436,18 @@ namespace lithe::codegen::backends {
             if (source.empty()) return art;
             art.text_payload = std::move(source);
 #if defined(__APPLE__) && defined(HAS_METAL_CPP)
-            const auto pipeline = ::pravaha::backends::metal::metal_gpu_backend::instance().compile(
+            const auto pipeline = ::pravaha::backends::metal::get_or_compile_source(
+                metal_detail::source_cache_key(art.text_payload, 0x19d6e8a4f25b3c71ULL),
                 art.text_payload, "lithe_metal_i64_elementwise");
             if (!pipeline) {
                 art.diagnostics.push_back("metal: pipeline compilation failed: " + pipeline.error().message);
                 return art;
             }
+            auto* native_pipeline = (*pipeline).get();
+            native_pipeline->retain();
             auto handle = std::make_shared<artifact_handle>();
             handle->kind = artifact_handle_kind::native_compute_pipeline;
-            handle->payload = std::shared_ptr<void>{*pipeline, [](void* raw) noexcept {
+            handle->payload = std::shared_ptr<void>{native_pipeline, [](void* raw) noexcept {
                 static_cast<MTL::ComputePipelineState*>(raw)->release();
             }};
             art.handle = std::move(handle);
@@ -475,15 +487,19 @@ namespace lithe::codegen::backends {
             art.text_payload = metal_detail::lower_hl_to_msl(plan, art.diagnostics);
             if (art.text_payload.empty()) return art;
 #if defined(__APPLE__) && defined(HAS_METAL_CPP)
-            const auto pipeline = ::pravaha::backends::metal::metal_gpu_backend::instance().compile(
+            const auto pipeline = ::pravaha::backends::metal::get_or_compile_source(
+                metal_detail::source_cache_key(art.text_payload,
+                    plan.identity ^ 0x4a6f9b8ce312d705ULL),
                 art.text_payload, "lithe_metal_hl");
             if (!pipeline) {
                 art.diagnostics.push_back("metal: HL pipeline compilation failed: " + pipeline.error().message);
                 return art;
             }
+            auto* native_pipeline = (*pipeline).get();
+            native_pipeline->retain();
             auto handle = std::make_shared<artifact_handle>();
             handle->kind = artifact_handle_kind::native_compute_pipeline;
-            handle->payload = std::shared_ptr<void>{*pipeline, [](void* raw) noexcept {
+            handle->payload = std::shared_ptr<void>{native_pipeline, [](void* raw) noexcept {
                 static_cast<MTL::ComputePipelineState*>(raw)->release();
             }};
             art.handle = std::move(handle);
