@@ -22,10 +22,12 @@
 // — honest fallback, no silent degradation.
 
 #include "lithe_codegen_interpreter.hpp"
+#include "../lithe_codegen_hl_passes.hpp"
 
 #include "hwy/highway.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 
@@ -122,6 +124,40 @@ namespace lithe::codegen::backends {
             return total;
         }
     };
+
+    enum class simd_plan_disposition : std::uint8_t {
+        accepted,
+        scalar_fallback
+    };
+
+    // Backend-local binding from an immutable, target-neutral vector plan to
+    // Highway's runtime lane shape. No plan is mutated and a rejected binding
+    // leaves the caller on the structured scalar path.
+    struct simd_plan_binding {
+        simd_plan_disposition disposition = simd_plan_disposition::scalar_fallback;
+        std::uint32_t planned_lanes = 0;
+        std::uint32_t native_lanes = 0;
+        hl::vector_tail_strategy tail = hl::vector_tail_strategy::scalar_fallback;
+
+        [[nodiscard]] constexpr bool accepted() const noexcept {
+            return disposition == simd_plan_disposition::accepted;
+        }
+    };
+
+    [[nodiscard]] inline simd_plan_binding bind_vector_plan(const hl::vector_plan& plan) noexcept {
+        simd_plan_binding out;
+        out.planned_lanes = plan.lanes;
+        out.native_lanes = static_cast<std::uint32_t>(simd_kernels::float_lanes());
+        out.tail = plan.tail;
+        const bool compatible_tail = plan.tail == hl::vector_tail_strategy::none
+            || plan.tail == hl::vector_tail_strategy::scalar_epilogue;
+        if (plan.legality == hl::vector_plan_legality::proven && plan.schedule_materialized
+            && plan.element_bits == 32 && plan.reduction == hl::vector_reduction_shape::none
+            && compatible_tail && out.native_lanes != 0) {
+            out.disposition = simd_plan_disposition::accepted;
+        }
+        return out;
+    }
 
     // ============================================================================
     // simd_backend — CodeEmissionTarget wrapper around the SIMD kernels.

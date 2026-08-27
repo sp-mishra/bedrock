@@ -1799,6 +1799,17 @@ compile-time template switch: `Observe=false` emits nothing and stores nothing;
 compatible observer. Provider discovery, device handles, and benchmark storage
 remain outside the portable core.
 
+`lithe_execution_benchmark.hpp` is an opt-in fixture for equivalent provider
+workloads. `measure_provider` records cold compilation separately from warmed
+execution samples and stops on the first failed equivalence predicate. It does
+not select a provider, retain artifacts, or run as part of normal execution.
+
+The Highway SIMD backend consumes a proven `vector_plan` through
+`bind_vector_plan`. It accepts only materialized f32 elementwise plans with a
+whole-vector or scalar-epilogue tail, then maps the target-neutral plan to the
+native Highway lane count. Every other plan returns an explicit scalar-fallback
+binding; no physical MIR is silently reinterpreted as vector code.
+
 **Pass composition helper:**
 
 ```cpp
