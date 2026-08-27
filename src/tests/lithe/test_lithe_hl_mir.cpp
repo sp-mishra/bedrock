@@ -836,3 +836,147 @@ TEST_CASE (
     CHECK(sf.trip_count_hint == 16u);
  }
 
+TEST_CASE (
+"vector_polyhedral_planning_pass: materializes a profitable scalar-tail vector plan",
+"[lithe][hl][vector][poly][phase-c]"
+) {
+    auto fn = make_hl_loop(1, 0, 18, 1, true);
+    auto* loop = fn.body_region.blocks.head->ops.head;
+    auto* body = loop->regions[0];
+    auto* block = fn.make_block();
+    body->blocks.push_back(block);
+    block->parent_region = body;
+    auto* load = fn.make_op(hl_opcode::memref_load);
+    memref_attr memory;
+    memory.view = memref_type::row_major(abstract_value_kind::floating, 32, 1, {18});
+    memory.view.alignment_bytes = 32;
+    load->attr = memory;
+    block->ops.push_back(load);
+
+    const auto result = vector_polyhedral_planning_pass{}.run(fn);
+    REQUIRE(result.ok());
+    REQUIRE(result.plans.size() == 1);
+    const auto& plan = result.plans.front();
+    REQUIRE(plan.legality == vector_plan_legality::proven);
+    REQUIRE(plan.lanes == 8);
+    REQUIRE(plan.tail == vector_tail_strategy::scalar_epilogue);
+    REQUIRE(plan.schedule_materialized);
+    REQUIRE(plan.scalar_fallback);
+}
+
+TEST_CASE (
+"vector_polyhedral_planning_pass: rejects possible in-place dependence",
+"[lithe][hl][vector][poly][phase-c]"
+) {
+    auto fn = make_hl_loop(1, 0, 32, 1, true);
+    auto* loop = fn.body_region.blocks.head->ops.head;
+    auto* body = loop->regions[0];
+    auto* block = fn.make_block();
+    body->blocks.push_back(block);
+    block->parent_region = body;
+    const auto base = fn.alloc_span<ssa_value_id>(1);
+    base[0] = ssa_value_id{42};
+    for (const auto opcode : {hl_opcode::memref_load, hl_opcode::memref_store}) {
+        auto* memory_op = fn.make_op(opcode);
+        memory_op->operands = base;
+        memref_attr memory;
+        memory.view = memref_type::row_major(abstract_value_kind::integer, 32, 1, {32});
+        memory.view.alignment_bytes = 32;
+        memory_op->attr = memory;
+        block->ops.push_back(memory_op);
+    }
+
+    const auto result = vector_polyhedral_planning_pass{}.run(fn);
+    REQUIRE(result.ok());
+    REQUIRE(result.plans.size() == 1);
+    REQUIRE(result.plans.front().legality == vector_plan_legality::rejected);
+    REQUIRE_FALSE(result.plans.front().schedule_materialized);
+}
+
+TEST_CASE (
+"vector_polyhedral_planning_pass: dynamic bounds retain a scalar fallback",
+"[lithe][hl][vector][poly][phase-c]"
+) {
+    auto fn = make_hl_loop(1, 0, 0, 1, true);
+    auto* loop = fn.body_region.blocks.head->ops.head;
+    auto& attr = std::get<structured_for_attr>(loop->attr);
+    attr.bounds[0].upper_known = false;
+    auto* body = loop->regions[0];
+    auto* block = fn.make_block();
+    body->blocks.push_back(block);
+    block->parent_region = body;
+    auto* load = fn.make_op(hl_opcode::memref_load);
+    memref_attr memory;
+    memory.view = memref_type::row_major(abstract_value_kind::floating, 32, 1, {0});
+    memory.view.alignment_bytes = 32;
+    load->attr = memory;
+    block->ops.push_back(load);
+
+    const auto result = vector_polyhedral_planning_pass{.options = {.masked_tails_supported = true}}.run(fn);
+    REQUIRE(result.ok());
+    REQUIRE(result.plans.size() == 1);
+    REQUIRE(result.plans.front().legality != vector_plan_legality::proven);
+    REQUIRE(result.plans.front().scalar_fallback);
+    REQUIRE_FALSE(result.plans.front().schedule_materialized);
+}
+
+TEST_CASE (
+"select_execution_plan: deterministic cost selection honors vector legality",
+"[lithe][execution][cost][phase-d]"
+) {
+    execution_selection_inputs inputs;
+    inputs.work_items = 1024;
+    inputs.vector_legal = true;
+    inputs.candidates = {{
+        {planned_execution_kind::interpreter, true, 0, 10},
+        {planned_execution_kind::jit, true, 100, 2},
+        {planned_execution_kind::simd, true, 200, 1},
+        {planned_execution_kind::metal, false, 0, 0},
+        {planned_execution_kind::vulkan, false, 0, 0},
+    }};
+    const auto first = select_execution_plan(inputs);
+    const auto second = select_execution_plan(inputs);
+    REQUIRE(first.selected == planned_execution_kind::simd);
+    REQUIRE(first.selected == second.selected);
+    REQUIRE(first.estimated_cost_ns == second.estimated_cost_ns);
+}
+
+TEST_CASE (
+"select_execution_plan: unavailable explicit provider falls back safely",
+"[lithe][execution][cost][phase-d]"
+) {
+    execution_selection_inputs inputs;
+    inputs.candidates = {{
+        {planned_execution_kind::interpreter, true, 0, 10},
+        {planned_execution_kind::jit, false, 0, 0},
+        {planned_execution_kind::simd, false, 0, 0},
+        {planned_execution_kind::metal, false, 0, 0},
+        {planned_execution_kind::vulkan, true, 0, 1},
+    }};
+    const execution_selection_policy policy{.force = planned_execution_kind::metal};
+    const auto selected = select_execution_plan(inputs, policy);
+    REQUIRE(selected.selected == planned_execution_kind::interpreter);
+    REQUIRE(selected.fell_back);
+}
+
+TEST_CASE (
+"select_execution_plan: observation is compile-time opt-in",
+"[lithe][execution][cost][phase-d][observability]"
+) {
+    struct observer {
+        std::uint32_t events = 0;
+        void on_event(const execution_selection_event&) noexcept { ++events; }
+    } sink;
+    execution_selection_inputs inputs;
+    inputs.candidates = {{
+        {planned_execution_kind::interpreter, true, 0, 1},
+        {planned_execution_kind::jit, false, 0, 0},
+        {planned_execution_kind::simd, false, 0, 0},
+        {planned_execution_kind::metal, false, 0, 0},
+        {planned_execution_kind::vulkan, false, 0, 0},
+    }};
+    static_cast<void>(select_execution_plan<false>(inputs, {}, &sink));
+    REQUIRE(sink.events == 0);
+    static_cast<void>(select_execution_plan<true>(inputs, {}, &sink));
+    REQUIRE(sink.events == 1);
+}

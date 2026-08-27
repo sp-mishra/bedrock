@@ -570,6 +570,283 @@ namespace lithe::codegen::hl {
     };
 
     // -------------------------------------------------------------------------
+    // Target-neutral vector and polyhedral planning
+    //
+    // Plans are analysis artifacts, not an implicit HL rewrite.  This keeps
+    // structured lowering and scalar execution as the always-available fallback
+    // while allowing a CPU or device backend to consume exactly the same facts.
+    // -------------------------------------------------------------------------
+
+    enum class vector_tail_strategy : std::uint8_t {
+        none,
+        scalar_epilogue,
+        masked,
+        scalar_fallback
+    };
+
+    enum class vector_reduction_shape : std::uint8_t {
+        none,
+        horizontal
+    };
+
+    enum class vector_plan_legality : std::uint8_t {
+        proven,
+        unknown,
+        rejected
+    };
+
+    struct vector_plan {
+        std::uint32_t loop_operation = 0;
+        std::uint32_t lanes = 0;
+        std::uint32_t element_bits = 0;
+        std::uint32_t alignment_bytes = 0;
+        std::uint64_t trip_count = 0;
+        vector_tail_strategy tail = vector_tail_strategy::scalar_fallback;
+        vector_reduction_shape reduction = vector_reduction_shape::none;
+        vector_plan_legality legality = vector_plan_legality::unknown;
+        bool schedule_materialized = false;
+        bool scalar_fallback = true;
+        poly::affine_matrix schedule{};
+    };
+
+    struct vector_planning_options {
+        std::uint32_t vector_bits = 256;
+        std::uint32_t minimum_full_vectors = 2;
+        bool masked_tails_supported = false;
+        bool reductions_supported = false;
+    };
+
+    struct vector_planning_result {
+        std::vector<vector_plan> plans;
+        std::vector<std::string> diagnostics;
+
+        [[nodiscard]] bool ok() const noexcept { return diagnostics.empty(); }
+    };
+
+    struct vector_polyhedral_planning_pass {
+        vector_planning_options options{};
+
+        [[nodiscard]] vector_planning_result run(const hl_mir_function& fn) const {
+            vector_planning_result out;
+            if (options.vector_bits == 0 || options.minimum_full_vectors == 0) {
+                out.diagnostics.push_back("vector planning: vector width and minimum full vectors must be non-zero");
+                return out;
+            }
+            const auto extracted = extract_polyhedral_from_hl{}.run(fn);
+            if (!extracted.ok()) {
+                out.diagnostics.insert(out.diagnostics.end(), extracted.diagnostics.begin(), extracted.diagnostics.end());
+                return out;
+            }
+            const auto poly_for = [&](const std::uint32_t operation) -> const poly::polyhedral_loop* {
+                const auto found = std::ranges::find(extracted.loops, operation,
+                    [](const poly::polyhedral_loop& loop) { return loop.base.header; });
+                return found == extracted.loops.end() ? nullptr : std::addressof(*found);
+            };
+            const auto element_bits_for = [](const hl_operation& loop) noexcept -> std::uint32_t {
+                std::uint32_t bits = 0;
+                const auto visit = [&](auto& self, const hl_region& region) noexcept -> void {
+                    for (const auto* block = region.blocks.head; block != nullptr; block = block->list_node.next)
+                        for (const auto* op = block->ops.head; op != nullptr; op = op->list_node.next) {
+                            if ((op->op == hl_opcode::memref_load || op->op == hl_opcode::memref_store)
+                                && std::holds_alternative<memref_attr>(op->attr)) {
+                                const auto candidate = std::get<memref_attr>(op->attr).view.elem_bits;
+                                if (bits == 0) bits = candidate;
+                                else if (bits != candidate) bits = 0;
+                            }
+                            for (const auto* nested : op->regions) if (nested != nullptr) self(self, *nested);
+                        }
+                };
+                for (const auto* region : loop.regions) if (region != nullptr) visit(visit, *region);
+                return bits;
+            };
+            const auto visit = [&](auto& self, const hl_region& region) -> void {
+                for (const auto* block = region.blocks.head; block != nullptr; block = block->list_node.next) {
+                    for (const auto* op = block->ops.head; op != nullptr; op = op->list_node.next) {
+                        if (op->op == hl_opcode::structured_for && std::holds_alternative<structured_for_attr>(op->attr)) {
+                            vector_plan plan;
+                            plan.loop_operation = op->id;
+                            const auto legality = summarize_loop_legality(*op);
+                            plan.trip_count = legality.trip_count;
+                            plan.alignment_bytes = legality.minimum_alignment_bytes;
+                            plan.reduction = legality.has_reduction ? vector_reduction_shape::horizontal
+                                                                    : vector_reduction_shape::none;
+                            plan.element_bits = element_bits_for(*op);
+                            const auto* poly_loop = poly_for(op->id);
+                            if (poly_loop != nullptr) plan.schedule = poly_loop->schedule;
+
+                            const bool structural_legal = legality.is_parallel && legality.rank_one
+                                && legality.canonical_counted && legality.regular_stride
+                                && legality.all_memrefs_contiguous && legality.uniform_memory_element_type
+                                && !legality.has_loop_carried_values && !legality.has_control_flow
+                                && !legality.possible_in_place_dependency
+                                && (!legality.has_reduction || options.reductions_supported)
+                                && poly_loop != nullptr && poly_loop->is_affine;
+                            if (!structural_legal || plan.element_bits == 0
+                                || options.vector_bits % plan.element_bits != 0) {
+                                plan.legality = vector_plan_legality::rejected;
+                                out.plans.push_back(std::move(plan));
+                            } else {
+                                plan.lanes = options.vector_bits / plan.element_bits;
+                                const bool aligned = plan.alignment_bytes >= options.vector_bits / 8;
+                                if (!aligned || plan.lanes == 0) {
+                                    plan.legality = vector_plan_legality::rejected;
+                                    out.plans.push_back(std::move(plan));
+                                } else if (!legality.static_trip_count) {
+                                    plan.legality = vector_plan_legality::unknown;
+                                    plan.tail = options.masked_tails_supported ? vector_tail_strategy::masked
+                                                                                : vector_tail_strategy::scalar_fallback;
+                                    out.plans.push_back(std::move(plan));
+                                } else {
+                                    const auto required = static_cast<std::uint64_t>(plan.lanes)
+                                        * options.minimum_full_vectors;
+                                    if (plan.trip_count < required) {
+                                        plan.legality = vector_plan_legality::rejected;
+                                    } else {
+                                        plan.legality = vector_plan_legality::proven;
+                                        const auto remainder = plan.trip_count % plan.lanes;
+                                        plan.tail = remainder == 0 ? vector_tail_strategy::none
+                                            : options.masked_tails_supported ? vector_tail_strategy::masked
+                                                                            : vector_tail_strategy::scalar_epilogue;
+                                        // The existing polyhedral extractor supplies the identity
+                                        // schedule. Materializing that schedule is profitable only
+                                        // after all legality and trip-count checks above succeed.
+                                        plan.schedule_materialized = true;
+                                    }
+                                    out.plans.push_back(std::move(plan));
+                                }
+                            }
+                        }
+                        for (const auto* nested : op->regions) if (nested != nullptr) self(self, *nested);
+                    }
+                }
+            };
+            visit(visit, fn.body_region);
+            return out;
+        }
+    };
+
+    // -------------------------------------------------------------------------
+    // Cost-guided execution selection
+    //
+    // This is a deterministic, allocation-free policy core. Provider discovery
+    // remains outside Lithe; callers supply availability and static cost facts.
+    // -------------------------------------------------------------------------
+
+    enum class planned_execution_kind : std::uint8_t {
+        interpreter,
+        jit,
+        simd,
+        metal,
+        vulkan
+    };
+
+    struct execution_candidate_cost {
+        planned_execution_kind kind = planned_execution_kind::interpreter;
+        bool available = false;
+        std::uint64_t setup_cost_ns = 0;
+        std::uint64_t work_item_cost_ns = 0;
+    };
+
+    struct execution_selection_inputs {
+        std::uint64_t work_items = 0;
+        bool vector_legal = false;
+        bool accelerator_legal = false;
+        std::array<execution_candidate_cost, 5> candidates{};
+    };
+
+    struct execution_selection_policy {
+        std::optional<planned_execution_kind> force{};
+        bool allow_jit = true;
+        bool allow_simd = true;
+        bool allow_accelerators = true;
+    };
+
+    struct execution_selection {
+        planned_execution_kind selected = planned_execution_kind::interpreter;
+        planned_execution_kind fallback = planned_execution_kind::interpreter;
+        std::uint64_t estimated_cost_ns = 0;
+        bool forced = false;
+        bool fell_back = false;
+        std::uint32_t evaluated_candidates = 0;
+    };
+
+    struct execution_selection_event {
+        planned_execution_kind selected = planned_execution_kind::interpreter;
+        std::uint64_t work_items = 0;
+        std::uint64_t estimated_cost_ns = 0;
+        std::uint32_t evaluated_candidates = 0;
+        bool fell_back = false;
+    };
+
+    [[nodiscard]] constexpr bool execution_candidate_legal(
+        const planned_execution_kind kind,
+        const execution_selection_inputs& inputs,
+        const execution_selection_policy& policy) noexcept {
+        switch (kind) {
+        case planned_execution_kind::interpreter: return true;
+        case planned_execution_kind::jit: return policy.allow_jit;
+        case planned_execution_kind::simd: return policy.allow_simd && inputs.vector_legal;
+        case planned_execution_kind::metal:
+        case planned_execution_kind::vulkan:
+            return policy.allow_accelerators && inputs.accelerator_legal;
+        }
+        return false;
+    }
+
+    [[nodiscard]] constexpr std::uint64_t estimated_execution_cost(
+        const execution_candidate_cost& candidate, const std::uint64_t work_items) noexcept {
+        if (candidate.work_item_cost_ns != 0
+            && work_items > (std::numeric_limits<std::uint64_t>::max() - candidate.setup_cost_ns)
+                / candidate.work_item_cost_ns)
+            return std::numeric_limits<std::uint64_t>::max();
+        return candidate.setup_cost_ns + candidate.work_item_cost_ns * work_items;
+    }
+
+    template <bool Observe = false, class Observer = observability::null_observer>
+    [[nodiscard]] execution_selection select_execution_plan(
+        const execution_selection_inputs& inputs,
+        const execution_selection_policy& policy = {},
+        Observer* observer = nullptr) noexcept {
+        const auto candidate_for = [&](const planned_execution_kind kind) -> const execution_candidate_cost* {
+            const auto found = std::ranges::find(inputs.candidates, kind, &execution_candidate_cost::kind);
+            return found == inputs.candidates.end() ? nullptr : std::addressof(*found);
+        };
+        const auto interpreter = candidate_for(planned_execution_kind::interpreter);
+        execution_selection out;
+        out.fallback = interpreter != nullptr && interpreter->available
+            ? planned_execution_kind::interpreter : planned_execution_kind::jit;
+        if (policy.force.has_value()) {
+            const auto* forced = candidate_for(*policy.force);
+            if (forced != nullptr && forced->available && execution_candidate_legal(forced->kind, inputs, policy)) {
+                out.selected = forced->kind;
+                out.estimated_cost_ns = estimated_execution_cost(*forced, inputs.work_items);
+                out.forced = true;
+                out.evaluated_candidates = 1;
+            } else {
+                out.selected = out.fallback;
+                out.fell_back = true;
+            }
+        } else {
+            std::uint64_t best_cost = std::numeric_limits<std::uint64_t>::max();
+            for (const auto& candidate : inputs.candidates) {
+                if (!candidate.available || !execution_candidate_legal(candidate.kind, inputs, policy)) continue;
+                ++out.evaluated_candidates;
+                const auto cost = estimated_execution_cost(candidate, inputs.work_items);
+                // Array order is the deterministic tie-break: interpreter, JIT,
+                // SIMD, Metal, Vulkan. On macOS callers place Metal before Vulkan.
+                if (cost < best_cost) { best_cost = cost; out.selected = candidate.kind; }
+            }
+            if (out.evaluated_candidates == 0) { out.selected = out.fallback; out.fell_back = true; }
+            out.estimated_cost_ns = best_cost == std::numeric_limits<std::uint64_t>::max() ? 0 : best_cost;
+        }
+        if constexpr (Observe) {
+            if (observer != nullptr) observability::emit<true>(*observer, execution_selection_event{
+                out.selected, inputs.work_items, out.estimated_cost_ns, out.evaluated_candidates, out.fell_back});
+        }
+        return out;
+    }
+
+    // -------------------------------------------------------------------------
     // coordinate_lowering_pass — hl::mir_function → physical_mir_function
     //   The single, explicit HL→LL boundary.  After this pass, all existing
     //   flat passes and backends work unchanged.

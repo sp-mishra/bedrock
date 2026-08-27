@@ -1782,6 +1782,23 @@ when derived byte offsets are representable.
 Multiple independent addresses receive independent pointer inductions; every
 unproven, malformed, or overflowing descriptor retains its original MIR.
 
+`vector_polyhedral_planning_pass` is an opt-in HL-MIR analysis pass. It emits
+target-neutral `vector_plan` records containing lanes, element width, alignment,
+tail strategy, reduction shape, legality, the extracted affine schedule, and an
+explicit scalar fallback. A schedule is materialized only for a proven affine,
+contiguous, non-dependent, sufficiently large loop. Unknown dynamic bounds and
+unsupported reductions retain the structured scalar path; no vector opcode or
+target dependency is introduced into HL-MIR.
+
+`select_execution_plan` is the opt-in, deterministic Phase-D selector. Callers
+provide provider availability and setup/per-work-item costs for interpreter,
+JIT, SIMD, Metal, and Vulkan; Lithe applies legality gates, explicit overrides,
+overflow-safe cost arithmetic, and a scalar fallback. The event path is a
+compile-time template switch: `Observe=false` emits nothing and stores nothing;
+`Observe=true` forwards a POD `execution_selection_event` to an existing Nadi-
+compatible observer. Provider discovery, device handles, and benchmark storage
+remain outside the portable core.
+
 **Pass composition helper:**
 
 ```cpp
