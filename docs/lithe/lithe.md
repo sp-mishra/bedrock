@@ -1803,6 +1803,9 @@ remain outside the portable core.
 workloads. `measure_provider` records cold compilation separately from warmed
 execution samples and stops on the first failed equivalence predicate. It does
 not select a provider, retain artifacts, or run as part of normal execution.
+`record_measurement` is a separate opt-in adapter that converts only equivalent
+warm samples into the existing feedback store, making them available to an
+adaptive cost model without making benchmark collection part of compilation.
 
 The Highway SIMD backend consumes a proven `vector_plan` through
 `bind_vector_plan`. It accepts only materialized f32 elementwise plans with a

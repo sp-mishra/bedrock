@@ -3,10 +3,13 @@
 // Opt-in benchmark fixture for equivalent provider workloads. Normal execution
 // neither includes nor pays for this utility.
 
+#include "lithe_feedback.hpp"
+
 #include <chrono>
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -54,5 +57,32 @@ namespace lithe::benchmark {
             if (!out.equivalent) break;
         }
         return out;
+    }
+
+    struct feedback_record_options {
+        std::size_t expression_hash = 0;
+        feedback::hardware_signature hardware = feedback::hardware_signature::current();
+        std::string backend_id;
+        std::uint64_t work_items = 0;
+        double memory_mb = 0.0;
+        double power_w = 0.0;
+    };
+
+    [[nodiscard]] inline bool record_measurement(
+        feedback::feedback_store& store, const provider_measurement& measurement,
+        const feedback_record_options& options) {
+        const auto median_ns = measurement.median_warm_execution_ns();
+        if (!measurement.equivalent || median_ns == 0 || options.backend_id.empty()) return false;
+        feedback::performance_sample sample;
+        sample.expression_hash = options.expression_hash;
+        sample.hw = options.hardware;
+        sample.backend_id = options.backend_id;
+        sample.latency_ms = static_cast<double>(median_ns) / 1'000'000.0;
+        sample.throughput_gops = options.work_items == 0 ? 0.0
+            : static_cast<double>(options.work_items) / static_cast<double>(median_ns);
+        sample.memory_mb = options.memory_mb;
+        sample.power_w = options.power_w;
+        store.record(std::move(sample));
+        return true;
     }
 } // namespace lithe::benchmark

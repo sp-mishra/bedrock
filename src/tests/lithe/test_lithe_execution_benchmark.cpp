@@ -29,3 +29,24 @@ TEST_CASE(
     REQUIRE_FALSE(measurement.equivalent);
     REQUIRE(measurement.warm_execution_ns.size() == 1);
 }
+
+TEST_CASE(
+    "record_measurement publishes only equivalent warm measurements",
+    "[lithe][benchmark][feedback]"
+) {
+    lithe::benchmark::provider_measurement measurement;
+    measurement.equivalent = true;
+    measurement.warm_execution_ns = {200, 100, 300};
+    lithe::feedback::feedback_store store;
+    const lithe::benchmark::feedback_record_options options{
+        .expression_hash = 17,
+        .hardware = {},
+        .backend_id = "simd",
+        .work_items = 1000,
+    };
+    REQUIRE(lithe::benchmark::record_measurement(store, measurement, options));
+    const auto profile = store.query(17, {});
+    REQUIRE(profile.has_value());
+    REQUIRE(profile->sample_count == 1);
+    REQUIRE(profile->best_backend_id == "simd");
+}
