@@ -5,6 +5,7 @@
 // count in buffer(2), and one MIR invocation per Metal thread.
 
 #include "../lithe_codegen_pipeline.hpp"
+#include "../lithe_codegen_hl_passes.hpp"
 #include "../lithe_codegen_device.hpp"
 #include "../lithe_execution/backend_persist.hpp"
 #include "pravaha/backends/metal_gpu.hpp"
@@ -12,6 +13,7 @@
 #include <expected>
 #include <array>
 #include <charconv>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -25,6 +27,18 @@ namespace lithe::codegen::backends {
     struct metal_runtime_error { std::string message; };
 
     struct metal_backend;
+
+    enum class metal_plan_disposition : std::uint8_t { accepted, scalar_fallback };
+
+    struct metal_plan_binding {
+        metal_plan_disposition disposition = metal_plan_disposition::scalar_fallback;
+        std::uint32_t lanes = 0;
+        hl::vector_tail_strategy tail = hl::vector_tail_strategy::scalar_fallback;
+
+        [[nodiscard]] constexpr bool accepted() const noexcept {
+            return disposition == metal_plan_disposition::accepted;
+        }
+    };
 
     // Ephemeral, move-only f32 storage owned by the selected Metal device.
     // It never crosses the portable artifact boundary: explicit upload() and
@@ -801,6 +815,29 @@ namespace lithe::codegen::backends {
 #endif
         }
     };
+
+    // Binding is deliberately separate from MSL emission: the common plan owns
+    // legality, while this backend only decides whether its current native
+    // contract can consume that already-proven work.
+    [[nodiscard]] inline metal_plan_binding bind_vector_plan_for_metal(
+        const hl::vector_plan& plan) noexcept {
+        metal_plan_binding binding{
+            .lanes = plan.lanes,
+            .tail = plan.tail,
+        };
+        const bool compatible_tail = plan.tail == hl::vector_tail_strategy::none
+            || plan.tail == hl::vector_tail_strategy::scalar_epilogue
+            || plan.tail == hl::vector_tail_strategy::masked;
+        if (plan.legality == hl::vector_plan_legality::proven
+            && plan.schedule_materialized
+            && plan.element_bits == 32
+            && plan.reduction == hl::vector_reduction_shape::none
+            && compatible_tail
+            && metal_backend::available()) {
+            binding.disposition = metal_plan_disposition::accepted;
+        }
+        return binding;
+    }
 
     static_assert(CodeEmissionTarget<metal_backend>);
 } // namespace lithe::codegen::backends

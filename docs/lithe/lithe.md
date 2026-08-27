@@ -1813,6 +1813,21 @@ whole-vector or scalar-epilogue tail, then maps the target-neutral plan to the
 native Highway lane count. Every other plan returns an explicit scalar-fallback
 binding; no physical MIR is silently reinterpreted as vector code.
 
+The native Metal path consumes the same `vector_plan` through
+`bind_vector_plan_for_metal`. It first rejects plans that are not proven,
+materialized f32 elementwise work, then checks native Metal availability. Its
+binding supports whole-vector, scalar-epilogue, and masked tails; all other
+plans retain an explicit fallback decision. Binding does not emit a kernel or
+retain a device handle, so it remains an optional backend-only operation.
+
+Vulkan and MoltenVK consume the same plan through
+`bind_vector_plan_for_vulkan(vector_plan, kernel_plan)`. The binding is portable
+and does not create a Vulkan device: it accepts only proven, materialized f32
+elementwise work which also satisfies the existing SPIR-V ABI (two readable,
+one writable, rank-1 contiguous bindings). A compatible binding may proceed to
+optional provider installation; an unavailable device or failed installation
+retains the explicit fallback path.
+
 **Pass composition helper:**
 
 ```cpp

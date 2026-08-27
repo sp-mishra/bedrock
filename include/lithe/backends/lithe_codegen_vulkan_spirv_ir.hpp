@@ -32,9 +32,26 @@
 #include "../lithe_ir/provider.hpp"   // ir_resolution_state, cpo::{export_text,export_binary,validate_ir}, ir_error
 #include "../lithe_ir/format.hpp"     // format_descriptor
 #include "../lithe_ir/integration.hpp" // owned_text_ir / owned_binary_ir (export result payloads)
+#include "../lithe_codegen_hl_passes.hpp"
 #include "../lithe_codegen_device.hpp"
 
 namespace lithe::codegen::backends {
+    enum class vulkan_plan_disposition : std::uint8_t { spirv_compatible, scalar_fallback };
+
+    // A non-owning bridge between generic loop planning and the existing
+    // Vulkan/MoltenVK SPIR-V kernel contract.  It has no Vulkan types so it is
+    // available to portable callers even when the optional provider is absent.
+    struct vulkan_plan_binding {
+        vulkan_plan_disposition disposition = vulkan_plan_disposition::scalar_fallback;
+        std::uint32_t planned_lanes = 0;
+        std::uint32_t local_x = 0;
+        hl::vector_tail_strategy tail = hl::vector_tail_strategy::scalar_fallback;
+
+        [[nodiscard]] constexpr bool compatible() const noexcept {
+            return disposition == vulkan_plan_disposition::spirv_compatible;
+        }
+    };
+
     [[nodiscard]] inline bool supports_spirv_elementwise_plan(
         const device::kernel_plan& plan) noexcept {
         return plan.elementwise_dispatch_compatible()
@@ -44,6 +61,28 @@ namespace lithe::codegen::backends {
             && std::ranges::all_of(plan.bindings, [](const device::kernel_binding& binding) {
                 return binding.view.rank == 1 && binding.view.contiguous;
             });
+    }
+
+    // This binding does not probe a VkDevice: provider creation remains the
+    // optional runtime step.  A compatible result instead means the plan is
+    // admissible by the checked-in SPIR-V ABI, so a failed runtime install can
+    // safely select the same explicit fallback as any other provider failure.
+    [[nodiscard]] inline vulkan_plan_binding bind_vector_plan_for_vulkan(
+        const hl::vector_plan& vector_plan,
+        const device::kernel_plan& kernel_plan) noexcept {
+        vulkan_plan_binding binding{
+            .planned_lanes = vector_plan.lanes,
+            .local_x = kernel_plan.launch.local_x,
+            .tail = vector_plan.tail,
+        };
+        if (vector_plan.legality == hl::vector_plan_legality::proven
+            && vector_plan.schedule_materialized
+            && vector_plan.element_bits == 32
+            && vector_plan.reduction == hl::vector_reduction_shape::none
+            && supports_spirv_elementwise_plan(kernel_plan)) {
+            binding.disposition = vulkan_plan_disposition::spirv_compatible;
+        }
+        return binding;
     }
 
     // =========================================================================
