@@ -176,11 +176,13 @@ namespace lithe::codegen::backends {
     };
 
     enum class spirv_binary_operation : std::uint8_t { add, multiply };
+    inline constexpr std::uint32_t spirv_binary_default_local_x = 64;
 
     // Generic three-buffer f32 ABI: output[i] = lhs[i] op rhs[i]. The distinct
     // block types preserve MoltenVK/SPIRV-Cross binding behaviour.
     [[nodiscard]] inline spirv_module emit_spirv_binary_elementwise(
-        const spirv_binary_operation operation, const std::uint32_t local_x = 64) {
+        const spirv_binary_operation operation,
+        const std::uint32_t local_x = spirv_binary_default_local_x) {
         using word = std::uint32_t;
         constexpr word main = 1, void_t = 2, fn = 3, uint_t = 4, float_t = 5, v3uint = 6,
             ptr_in_v3 = 7, giid = 8, uint0 = 9, ptr_in_uint = 10, pgiid = 11,

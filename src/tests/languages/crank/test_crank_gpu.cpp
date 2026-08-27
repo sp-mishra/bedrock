@@ -53,7 +53,7 @@ TEST_CASE (
     auto mod = gpu_backend{}.compile_elementwise(gpu_elementwise_op::add);
     // validate() populates local_{x,y,z} from OpExecutionMode LocalSize.
     (void)mod.validate();
-    CHECK(mod.local_x == spirv_elementwise_emitter::k_local_x);
+    CHECK(mod.local_x == lithe::codegen::backends::spirv_binary_default_local_x);
     CHECK(mod.local_y == 1u);
     CHECK(mod.local_z == 1u);
 }
@@ -145,4 +145,14 @@ TEST_CASE (
     CHECK(gpu_backend::select_provider(true, false) == gpu_provider::metal);
     CHECK(gpu_backend::select_provider(false, true) == gpu_provider::vulkan);
     CHECK(gpu_backend::select_provider(false, false) == gpu_provider::none);
+}
+
+TEST_CASE("crank gpu delegates binary SPIR-V emission to Lithe", "[crank][gpu][lithe]")
+{
+    const auto crank_module = gpu_backend{}.compile_elementwise(gpu_elementwise_op::add);
+    const auto lithe_module = lithe::codegen::backends::emit_spirv_binary_elementwise(
+        lithe::codegen::backends::spirv_binary_operation::add);
+
+    CHECK(crank_module.words == lithe_module.words);
+    CHECK(crank_module.identity_hash() == lithe_module.identity_hash());
 }
