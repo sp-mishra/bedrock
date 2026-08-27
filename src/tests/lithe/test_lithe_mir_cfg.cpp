@@ -1732,3 +1732,126 @@ TEST_CASE (
         REQUIRE_FALSE(part.is_partitioned());
     }
 }
+
+TEST_CASE (
+"affine_induction_strength_reduction_pass: supports signed starts and steps",
+"[lithe][mir][strength-reduction][phase-b]"
+) {
+    allocated_instruction condition{.id = 2, .op = opcode::branch_cond,
+        .uses = {allocated_operand::as_preg(preg{9, "cond"}), allocated_operand::as_block(3),
+                 allocated_operand::as_block(5)}};
+    allocated_instruction multiply{.id = 3, .op = opcode::mul,
+        .defs = {allocated_operand::as_preg(preg{4, "scaled"})},
+        .uses = {allocated_operand::as_preg(preg{1, "iv"}), allocated_operand::as_i64(8)}};
+    allocated_instruction address{.id = 4, .op = opcode::add,
+        .defs = {allocated_operand::as_preg(preg{5, "address"})},
+        .uses = {allocated_operand::as_preg(preg{2, "base"}), allocated_operand::as_preg(preg{4, "scaled"})}};
+    allocated_instruction advance{.id = 5, .op = opcode::add,
+        .defs = {allocated_operand::as_preg(preg{1, "iv"})},
+        .uses = {allocated_operand::as_preg(preg{1, "iv"}), allocated_operand::as_i64(-2)}};
+    auto fn = make_physical({
+        make_block(1, {make_branch(1, 2)}, {2}), make_block(2, {condition}, {3, 5}),
+        make_block(3, {multiply, address, make_branch(6, 4)}, {4}),
+        make_block(4, {advance, make_branch(7, 2)}, {2}), make_block(5, {make_ret(8)})}, 1);
+    fn.canonical_loops.push_back({1, 2, 4, 5, preg{1, "iv"}, 9, -1, -2});
+    fn.affine_addresses.push_back({2, 3, 4, preg{1, "iv"}, preg{2, "base"}, preg{4, "scaled"},
+                                   preg{5, "address"}, 8});
+    fn.affine_addresses.front().constant_offset_bytes = 5;
+    mir_pass_context context;
+    const auto result = affine_induction_strength_reduction_pass{}.run(fn, context);
+    REQUIRE(result.changed);
+    const auto& preheader = *std::ranges::find(result.function.function.blocks, 1u, &allocated_basic_block::id);
+    const auto init = std::ranges::find_if(preheader.instructions, [](const allocated_instruction& inst) {
+        return inst.op == opcode::add && inst.uses.size() == 2
+            && inst.uses.back().type == allocated_operand::kind::immediate_i64;
+    });
+    REQUIRE(init != preheader.instructions.end());
+    REQUIRE(std::get<std::int64_t>(init->uses.back().value) == 77);
+}
+
+TEST_CASE (
+"canonical_loop_preheader_pass: normalizes multiple external entries",
+"[lithe][mir][preheader][phase-b]"
+) {
+    allocated_instruction select{.id = 1, .op = opcode::branch_cond,
+        .uses = {allocated_operand::as_preg(preg{1, "select"}), allocated_operand::as_block(2),
+                 allocated_operand::as_block(3)}};
+    allocated_instruction loop_condition{.id = 4, .op = opcode::branch_cond,
+        .uses = {allocated_operand::as_preg(preg{2, "loop"}), allocated_operand::as_block(5),
+                 allocated_operand::as_block(6)}};
+    auto fn = make_physical({
+        make_block(1, {select}, {2, 3}), make_block(2, {make_branch(2, 4)}, {4}),
+        make_block(3, {make_branch(3, 4)}, {4}), make_block(4, {loop_condition}, {5, 6}),
+        make_block(5, {make_branch(5, 4)}, {4}), make_block(6, {make_ret(6)})}, 1);
+    mir_pass_context context;
+    const auto result = canonical_loop_preheader_pass{}.run(fn, context);
+    REQUIRE(result.changed);
+    const auto header = std::ranges::find(result.function.function.blocks, 4u, &allocated_basic_block::id);
+    REQUIRE(header != result.function.function.blocks.end());
+    REQUIRE(header->predecessors.size() == 2);
+    REQUIRE(std::ranges::any_of(result.function.function.blocks, [](const allocated_basic_block& block) {
+        return block.name == "preheader.4" && block.successors == std::vector<std::uint32_t>{4};
+    }));
+}
+
+TEST_CASE (
+"loop_invariant_code_motion_pass: hoists pure integer arithmetic only",
+"[lithe][mir][licm][phase-b]"
+) {
+    const preg invariant{7, "invariant"};
+    const preg result_reg{8, "result"};
+    allocated_instruction condition{.id = 2, .op = opcode::branch_cond,
+        .uses = {allocated_operand::as_preg(preg{9, "cond"}), allocated_operand::as_block(3),
+                 allocated_operand::as_block(5)}};
+    allocated_instruction pure_add{.id = 3, .op = opcode::add,
+        .defs = {allocated_operand::as_preg(result_reg)},
+        .uses = {allocated_operand::as_preg(invariant), allocated_operand::as_i64(7)}};
+    auto fn = make_physical({
+        make_block(1, {make_branch(1, 2)}, {2}), make_block(2, {condition}, {3, 5}),
+        make_block(3, {pure_add, make_branch(4, 4)}, {4}), make_block(4, {make_branch(5, 2)}, {2}),
+        make_block(5, {make_ret(6)})}, 1);
+    mir_pass_context context;
+    const auto result = loop_invariant_code_motion_pass{}.run(fn, context);
+    REQUIRE(result.changed);
+    const auto& preheader = *std::ranges::find(result.function.function.blocks, 1u, &allocated_basic_block::id);
+    REQUIRE(std::ranges::any_of(preheader.instructions, [](const allocated_instruction& inst) { return inst.id == 3; }));
+}
+
+TEST_CASE (
+"proof_gated_load_licm_pass: moves only a complete invariant-load proof",
+"[lithe][mir][licm][memory][phase-b]"
+) {
+    const preg base{2, "base"};
+    const preg loaded{3, "loaded"};
+    allocated_instruction condition{.id = 2, .op = opcode::branch_cond,
+        .uses = {allocated_operand::as_preg(preg{9, "cond"}), allocated_operand::as_block(3),
+                 allocated_operand::as_block(5)}};
+    allocated_instruction load{.id = 3, .op = opcode::load,
+        .defs = {allocated_operand::as_preg(loaded)},
+        .uses = {allocated_operand::as_memory(memory_address{.base = base, .displacement = 16})}};
+    auto fn = make_physical({
+        make_block(1, {make_branch(1, 2)}, {2}), make_block(2, {condition}, {3, 5}),
+        make_block(3, {load, make_branch(4, 4)}, {4}), make_block(4, {make_branch(5, 2)}, {2}),
+        make_block(5, {make_ret(6)})}, 1);
+    fn.canonical_loops.push_back({1, 2, 4, 5, preg{1, "iv"}, 0, 16, 1});
+    fn.invariant_loads.push_back({.loop_header_block = 2, .load_instruction = 3,
+                                  .address_invariant = true, .non_trapping = true,
+                                  .alias_proof = mir::load_motion_alias_proof::no_loop_writes});
+    mir_pass_context context;
+    const auto result = proof_gated_load_licm_pass{}.run(fn, context);
+    REQUIRE(result.changed);
+    const auto& preheader = *std::ranges::find(result.function.function.blocks, 1u, &allocated_basic_block::id);
+    REQUIRE(std::ranges::any_of(preheader.instructions, [](const allocated_instruction& inst) { return inst.id == 3; }));
+}
+
+TEST_CASE (
+"proof_gated_load_licm_pass: unknown alias proof preserves the load",
+"[lithe][mir][licm][memory][phase-b]"
+) {
+    auto fn = make_physical({make_block(1, {make_ret(1)})}, 1);
+    fn.invariant_loads.push_back({.loop_header_block = 1, .load_instruction = 1,
+                                  .address_invariant = true, .non_trapping = true});
+    mir_pass_context context;
+    const auto result = proof_gated_load_licm_pass{}.run(fn, context);
+    REQUIRE_FALSE(result.changed);
+}

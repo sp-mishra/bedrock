@@ -1757,21 +1757,30 @@ All passes are structs with `run()` — no `std::function`, no virtuals.
 | `task_plan_extraction_pass`  | Extract `task_decomposition_plan` from `is_parallel` ops                                                                                                                                                                      |
 
 At physical MIR `mir_opt_level::O2` runs the verified scalar cleanup sequence:
-unreachable-block elimination, jump threading, conservative loop-invariant
-motion, constant propagation, copy propagation, common-subexpression
+unreachable-block elimination, jump threading, strict loop-preheader
+normalization, conservative loop-invariant motion, affine induction strength
+reduction, constant propagation, copy propagation, common-subexpression
 elimination, dead-definition elimination, and peephole cleanup. The default remains `O0`; users opt in through
 `codegen_options::with_mir_opt_level(mir_opt_level::O2)` or supply their own
 pipeline.
 
-The O2 loop-invariant pass uses only an existing single preheader and hoists
-unique `load_imm` materializations. It intentionally does not create preheaders
-or move arithmetic/memory operations; those need complete effect and induction
-proofs before they can change execution placement.
+Preheaders are formed only by redirecting proven external CFG edges, and never
+when header arguments or phi placeholders would require repair. LICM hoists
+single-definition integer `load_imm`, move, arithmetic, and bitwise operations
+only when every register operand is loop-invariant. Division, remainder,
+shifts, floating-point operations, calls, and stores remain in place. A
+physical load moves only when a lowering supplies an `invariant_load_motion_proof`
+for that exact instruction: invariant base/index, non-trapping access, and
+either no loop writes or writes proven disjoint. The default proof is `unknown`,
+which leaves the load in place at zero extra cost.
 
 Structured lowering also records optional canonical-loop and affine-address
-descriptors. O2 uses them for pointer-induction strength reduction only for a
-zero-based, unit-step loop with an invariant base and an exact
-`base + (iv * stride)` address form; every other loop keeps its original MIR.
+descriptors. O2 uses them for pointer-induction strength reduction for an
+invariant base and exact `base + (iv * stride)` address form, including signed
+non-zero starts, steps, strides, and lowering-supplied invariant byte offsets
+when derived byte offsets are representable.
+Multiple independent addresses receive independent pointer inductions; every
+unproven, malformed, or overflowing descriptor retains its original MIR.
 
 **Pass composition helper:**
 

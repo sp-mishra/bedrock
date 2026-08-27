@@ -1727,6 +1727,27 @@ namespace lithe::codegen {
             std::int64_t stride_bytes = 0;
             bool strength_reduced = false;
             preg pointer_induction{};
+            // Optional byte displacement fact supplied by a lowering that has
+            // already separated a loop-invariant address offset from its base.
+            std::int64_t constant_offset_bytes = 0;
+        };
+
+        enum class load_motion_alias_proof : std::uint8_t {
+            unknown,
+            no_loop_writes,
+            disjoint_loop_writes
+        };
+
+        // A lowering-owned proof contract for moving one physical load.  The
+        // optimizer never infers this from a raw pointer or opcode: callers
+        // must establish invariant addressing, non-trapping access, and a
+        // loop-wide no-clobber fact independently.
+        struct invariant_load_motion_proof {
+            std::uint32_t loop_header_block = 0;
+            std::uint32_t load_instruction = 0;
+            bool address_invariant = false;
+            bool non_trapping = false;
+            load_motion_alias_proof alias_proof = load_motion_alias_proof::unknown;
         };
 
         struct physical_mir_function {
@@ -1748,6 +1769,7 @@ namespace lithe::codegen {
             std::optional<stack_map_artifact> stack_map; // populated by safepoint_injection_pass
             std::vector<canonical_loop_descriptor> canonical_loops;
             std::vector<affine_address_descriptor> affine_addresses;
+            std::vector<invariant_load_motion_proof> invariant_loads;
             // Optional execution budget derived by structured lowering for a
             // verified counted loop. Raw physical MIR retains the interpreter's
             // conservative fallback guard.

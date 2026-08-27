@@ -2094,11 +2094,102 @@ namespace lithe::codegen {
     // -----------------------------------------------------------------------
     // Loop-invariant code motion
     //
-    // Physical MIR does not create preheaders on its own.  This pass therefore
-    // only uses an already unambiguous, single external predecessor and hoists
-    // load_imm instructions: they have no operands, memory effects, traps, or
-    // target-dependent floating-point state.  Broader arithmetic and memory
-    // motion remains the responsibility of a future effect-aware LICM pass.
+    // A canonical preheader is created only when redirecting every external
+    // edge preserves the header's entry semantics.  It deliberately does not
+    // attempt phi repair: a loop carrying block arguments is left unchanged.
+    struct canonical_loop_preheader_pass {
+        [[nodiscard]] mir_pass_result run(
+            mir::physical_mir_function const& fn, mir_pass_context& ctx) const {
+            mir_pass_result out;
+            out.function = fn;
+            const auto loops = analyze_loops(fn);
+            if (!loops.ok()) return out;
+
+            std::uint32_t next_block = 0;
+            std::uint32_t next_instruction = 0;
+            for (const auto& block : out.function.function.blocks) {
+                next_block = std::max(next_block, block.id);
+                for (const auto& inst : block.instructions) next_instruction = std::max(next_instruction, inst.id);
+            }
+            bool changed = false;
+            for (const auto& loop : loops.loops) {
+                const auto cfg = analyze_cfg(out.function);
+                if (!cfg.ok()) break;
+                auto header = std::ranges::find(out.function.function.blocks, loop.header,
+                                                &allocated_basic_block::id);
+                if (header == out.function.function.blocks.end() || !header->arguments.empty()
+                    || !header->phi_placeholders.empty()) continue;
+                std::vector<std::uint32_t> incoming;
+                for (const auto& [id, info] : cfg.block_info)
+                    if (!loop.body.contains(id)
+                        && std::ranges::find(info.successors, loop.header) != info.successors.end())
+                        incoming.push_back(id);
+                if (incoming.size() < 2 || next_block == std::numeric_limits<std::uint32_t>::max()
+                    || next_instruction == std::numeric_limits<std::uint32_t>::max()) continue;
+
+                const std::uint32_t preheader_id = ++next_block;
+                bool rewritable = true;
+                for (const auto incoming_id : incoming) {
+                    auto predecessor = std::ranges::find(out.function.function.blocks, incoming_id,
+                                                        &allocated_basic_block::id);
+                    if (predecessor == out.function.function.blocks.end()) { rewritable = false; break; }
+                    const auto terminator = std::ranges::find_if(predecessor->instructions,
+                        [](const allocated_instruction& inst) { return inst.op == opcode::branch || inst.op == opcode::branch_cond; });
+                    if (terminator == predecessor->instructions.end()
+                        || !std::ranges::any_of(terminator->uses, [&](const allocated_operand& use) {
+                            return use.type == allocated_operand::kind::block
+                                && std::get<std::uint32_t>(use.value) == loop.header;
+                        })) { rewritable = false; break; }
+                }
+                if (!rewritable) continue;
+
+                for (const auto incoming_id : incoming) {
+                    auto predecessor = std::ranges::find(out.function.function.blocks, incoming_id,
+                                                        &allocated_basic_block::id);
+                    std::ranges::replace(predecessor->successors, loop.header, preheader_id);
+                    for (auto& inst : predecessor->instructions)
+                        for (auto& use : inst.uses)
+                            if (use.type == allocated_operand::kind::block
+                                && std::get<std::uint32_t>(use.value) == loop.header)
+                                use.value = preheader_id;
+                }
+                allocated_basic_block preheader;
+                preheader.id = preheader_id;
+                preheader.name = "preheader." + std::to_string(loop.header);
+                preheader.successors = {loop.header};
+                preheader.instructions = {allocated_instruction{
+                    .id = ++next_instruction, .op = opcode::branch,
+                    .uses = {allocated_operand::as_block(loop.header)}}};
+                out.function.function.blocks.push_back(std::move(preheader));
+                for (auto& descriptor : out.function.canonical_loops)
+                    if (descriptor.header_block == loop.header) descriptor.preheader_block = preheader_id;
+                changed = true;
+            }
+            if (!changed) return out;
+
+            out.function.function.cfg.successors.clear();
+            out.function.function.cfg.predecessors.clear();
+            for (auto& block : out.function.function.blocks) block.predecessors.clear();
+            for (const auto& block : out.function.function.blocks) {
+                out.function.function.cfg.successors[block.id] = block.successors;
+                for (const auto successor : block.successors) {
+                    out.function.function.cfg.predecessors[successor].push_back(block.id);
+                    auto target = std::ranges::find(out.function.function.blocks, successor,
+                                                    &allocated_basic_block::id);
+                    if (target != out.function.function.blocks.end()) target->predecessors.push_back(block.id);
+                }
+            }
+            const auto verification = verify_physical_mir(out.function);
+            if (!verification.ok()) { out.function = fn; return out; }
+            out.changed = true;
+            ctx.changed = true;
+            return out;
+        }
+    };
+
+    // Hoists only pure, integer, non-trapping operations with operands that
+    // are live on loop entry. Memory motion is intentionally excluded here:
+    // it requires a physical alias and trap contract, not a guess from opcode.
     // -----------------------------------------------------------------------
 
     struct loop_invariant_code_motion_pass {
@@ -2113,11 +2204,14 @@ namespace lithe::codegen {
             if (!cfg.ok()) return out;
 
             std::unordered_map<std::uint16_t, std::size_t> preg_def_count;
+            std::unordered_map<std::uint16_t, std::uint32_t> preg_def_block;
             for (const auto& block : out.function.function.blocks) {
                 for (const auto& inst : block.instructions) {
                     for (const auto& def : inst.defs) {
-                        if (def.type == allocated_operand::kind::preg)
+                        if (def.type == allocated_operand::kind::preg) {
                             ++preg_def_count[std::get<preg>(def.value).id];
+                            preg_def_block[std::get<preg>(def.value).id] = block.id;
+                        }
                     }
                 }
             }
@@ -2157,13 +2251,20 @@ namespace lithe::codegen {
                     std::vector<allocated_instruction> retained;
                     retained.reserve(block.instructions.size());
                     for (auto& inst : block.instructions) {
-                        const bool is_unique_load_imm = inst.op == opcode::load_imm
-                            && inst.defs.size() == 1
+                        const bool has_single_preg_def = inst.defs.size() == 1
                             && inst.defs.front().type == allocated_operand::kind::preg
-                            && inst.uses.size() == 1
-                            && inst.uses.front().type == allocated_operand::kind::immediate_i64
                             && preg_def_count[std::get<preg>(inst.defs.front().value).id] == 1;
-                        if (is_unique_load_imm) {
+                        const bool is_pure_integer = inst.op == opcode::load_imm || inst.op == opcode::mov
+                            || inst.op == opcode::add || inst.op == opcode::sub || inst.op == opcode::mul
+                            || inst.op == opcode::neg || inst.op == opcode::bit_and || inst.op == opcode::bit_or
+                            || inst.op == opcode::bit_xor || inst.op == opcode::bit_not;
+                        const bool operands_are_live_in = std::ranges::all_of(inst.uses,
+                            [&](const allocated_operand& use) {
+                                if (use.type != allocated_operand::kind::preg) return true;
+                                const auto def = preg_def_block.find(std::get<preg>(use.value).id);
+                                return def == preg_def_block.end() || !loop.body.contains(def->second);
+                            });
+                        if (has_single_preg_def && is_pure_integer && operands_are_live_in) {
                             moved.push_back(std::move(inst));
                         }
                         else {
@@ -2207,10 +2308,87 @@ namespace lithe::codegen {
         }
     };
 
+    // Memory LICM is opt-in at the MIR boundary. A proof is supplied by a
+    // lowering/effect analysis, then independently checked for a matching load
+    // and invariant address operands before the instruction can move.
+    struct proof_gated_load_licm_pass {
+        [[nodiscard]] mir_pass_result run(
+            mir::physical_mir_function const& fn, mir_pass_context& ctx) const {
+            mir_pass_result out;
+            out.function = fn;
+            if (out.function.invariant_loads.empty()) return out;
+            const auto loops = analyze_loops(fn);
+            const auto cfg = analyze_cfg(fn);
+            if (!loops.ok() || !cfg.ok()) return out;
+
+            std::unordered_map<std::uint16_t, std::uint32_t> preg_def_block;
+            for (const auto& block : out.function.function.blocks)
+                for (const auto& inst : block.instructions)
+                    for (const auto& def : inst.defs)
+                        if (def.type == allocated_operand::kind::preg)
+                            preg_def_block[std::get<preg>(def.value).id] = block.id;
+            const auto block_for = [&](const std::uint32_t id) -> allocated_basic_block* {
+                const auto found = std::ranges::find(out.function.function.blocks, id, &allocated_basic_block::id);
+                return found == out.function.function.blocks.end() ? nullptr : std::addressof(*found);
+            };
+            bool changed = false;
+            for (const auto& proof : out.function.invariant_loads) {
+                if (!proof.address_invariant || !proof.non_trapping
+                    || proof.alias_proof == mir::load_motion_alias_proof::unknown) continue;
+                const auto loop = std::ranges::find(loops.loops, proof.loop_header_block, &loop_info::header);
+                if (loop == loops.loops.end()) continue;
+                std::vector<std::uint32_t> external_predecessors;
+                for (const auto& [id, info] : cfg.block_info)
+                    if (!loop->body.contains(id)
+                        && std::ranges::find(info.successors, loop->header) != info.successors.end())
+                        external_predecessors.push_back(id);
+                if (external_predecessors.size() != 1) continue;
+                auto* preheader = block_for(external_predecessors.front());
+                if (!preheader) continue;
+
+                allocated_basic_block* owner = nullptr;
+                auto load = out.function.function.blocks.front().instructions.end();
+                for (auto& block : out.function.function.blocks) {
+                    const auto found = std::ranges::find(block.instructions, proof.load_instruction,
+                                                         &allocated_instruction::id);
+                    if (found != block.instructions.end()) { owner = std::addressof(block); load = found; break; }
+                }
+                if (!owner || !loop->body.contains(owner->id) || owner->id == loop->header
+                    || load->op != opcode::load || load->defs.size() != 1
+                    || load->defs.front().type != allocated_operand::kind::preg || load->uses.size() != 1
+                    || load->uses.front().type != allocated_operand::kind::memory) continue;
+                const auto& address = std::get<memory_operand>(load->uses.front().value).address;
+                const auto operand_is_live_in = [&](const std::optional<preg>& operand) {
+                    if (!operand.has_value()) return true;
+                    const auto found = preg_def_block.find(operand->id);
+                    return found == preg_def_block.end() || !loop->body.contains(found->second);
+                };
+                if (!operand_is_live_in(address.base) || !operand_is_live_in(address.index)) continue;
+
+                allocated_instruction moved = std::move(*load);
+                owner->instructions.erase(load);
+                const auto terminator = std::ranges::find_if(preheader->instructions,
+                    [](const allocated_instruction& inst) {
+                        return inst.op == opcode::branch || inst.op == opcode::branch_cond || inst.op == opcode::ret;
+                    });
+                preheader->instructions.insert(terminator, std::move(moved));
+                changed = true;
+            }
+            if (!changed) return out;
+            const auto verification = verify_physical_mir(out.function);
+            out.function.verified = verification.ok();
+            out.function.verification_diagnostics = verification.diagnostics;
+            if (!verification.ok()) { out.function = fn; return out; }
+            out.changed = true;
+            ctx.changed = true;
+            return out;
+        }
+    };
+
     // Replaces `base + (iv * stride)` with a pointer induction variable for the
-    // exact canonical form recorded by structured lowering. The initial version
-    // deliberately accepts only zero-based, unit-step loops and loop-invariant
-    // bases; all other forms retain their original arithmetic.
+    // exact canonical form recorded by structured lowering. Signed starts,
+    // steps, and strides are accepted only when both derived byte offsets fit
+    // in the MIR immediate domain; every other form remains untouched.
     struct affine_induction_strength_reduction_pass {
         [[nodiscard]] mir_pass_result run(
             mir::physical_mir_function const& fn, mir_pass_context& ctx) const {
@@ -2240,11 +2418,24 @@ namespace lithe::codegen {
             };
 
             bool changed = false;
-            const auto checked_positive_product = [](const std::int64_t lhs, const std::int64_t rhs,
-                                                     std::int64_t& result) noexcept {
-                if (lhs < 0 || rhs < 0 || (lhs != 0 && rhs > std::numeric_limits<std::int64_t>::max() / lhs))
-                    return false;
+            const auto checked_product = [](const std::int64_t lhs, const std::int64_t rhs,
+                                            std::int64_t& result) noexcept {
+                if (lhs == 0 || rhs == 0) { result = 0; return true; }
+                if (lhs == -1 && rhs == std::numeric_limits<std::int64_t>::min()) return false;
+                if (rhs == -1 && lhs == std::numeric_limits<std::int64_t>::min()) return false;
+                if (lhs > 0) {
+                    if ((rhs > 0 && lhs > std::numeric_limits<std::int64_t>::max() / rhs)
+                        || (rhs < 0 && rhs < std::numeric_limits<std::int64_t>::min() / lhs)) return false;
+                } else if ((rhs > 0 && lhs < std::numeric_limits<std::int64_t>::min() / rhs)
+                           || (rhs < 0 && lhs < std::numeric_limits<std::int64_t>::max() / rhs)) return false;
                 result = lhs * rhs;
+                return true;
+            };
+            const auto checked_sum = [](const std::int64_t lhs, const std::int64_t rhs,
+                                        std::int64_t& result) noexcept {
+                if ((rhs > 0 && lhs > std::numeric_limits<std::int64_t>::max() - rhs)
+                    || (rhs < 0 && lhs < std::numeric_limits<std::int64_t>::min() - rhs)) return false;
+                result = lhs + rhs;
                 return true;
             };
             for (auto& address : out.function.affine_addresses) {
@@ -2254,11 +2445,12 @@ namespace lithe::codegen {
                 const auto analysis_it = std::ranges::find(loops.loops, address.loop_header_block,
                     &loop_info::header);
                 if (loop_it == out.function.canonical_loops.end() || analysis_it == loops.loops.end()
-                    || loop_it->lower < 0 || loop_it->step <= 0 || address.stride_bytes <= 0) continue;
+                    || loop_it->step == 0 || address.stride_bytes == 0) continue;
                 std::int64_t start_offset = 0;
                 std::int64_t increment = 0;
-                if (!checked_positive_product(loop_it->lower, address.stride_bytes, start_offset)
-                    || !checked_positive_product(loop_it->step, address.stride_bytes, increment)) continue;
+                if (!checked_product(loop_it->lower, address.stride_bytes, start_offset)
+                    || !checked_sum(start_offset, address.constant_offset_bytes, start_offset)
+                    || !checked_product(loop_it->step, address.stride_bytes, increment)) continue;
 
                 bool base_defined_in_loop = false;
                 for (const auto& block : out.function.function.blocks) {
@@ -2273,8 +2465,23 @@ namespace lithe::codegen {
                 auto* latch = block_for(loop_it->latch_block);
                 auto* multiply = instruction_for(address.multiply_instruction);
                 auto* add = instruction_for(address.address_instruction);
+                const auto is_preg = [](const allocated_operand& operand, const preg expected) {
+                    return operand.type == allocated_operand::kind::preg
+                        && std::get<preg>(operand.value).id == expected.id;
+                };
+                const auto is_i64 = [](const allocated_operand& operand, const std::int64_t expected) {
+                    return operand.type == allocated_operand::kind::immediate_i64
+                        && std::get<std::int64_t>(operand.value) == expected;
+                };
                 if (!preheader || !latch || !multiply || !add || multiply->op != opcode::mul
-                    || add->op != opcode::add) continue;
+                    || add->op != opcode::add || multiply->defs.size() != 1 || multiply->uses.size() != 2
+                    || add->defs.size() != 1 || add->uses.size() != 2
+                    || !is_preg(multiply->defs.front(), address.scaled_index)
+                    || !is_preg(multiply->uses.front(), address.induction)
+                    || !is_i64(multiply->uses.back(), address.stride_bytes)
+                    || !is_preg(add->defs.front(), address.address)
+                    || !is_preg(add->uses.front(), address.base)
+                    || !is_preg(add->uses.back(), address.scaled_index)) continue;
 
                 const preg pointer{next_preg++, "ptr.iv" + std::to_string(address.loop_header_block)};
                 allocated_instruction init{.id = 0, .op = opcode::add,
@@ -5456,7 +5663,9 @@ namespace lithe::codegen {
             preset.kind = mir_pipeline_preset_kind::conservative;
             preset.pipeline.add_pass("unreachable_block_elimination_pass", unreachable_block_elimination_pass{});
             preset.pipeline.add_pass("trivial_jump_threading_pass", trivial_jump_threading_pass{});
+            preset.pipeline.add_pass("canonical_loop_preheader_pass", canonical_loop_preheader_pass{});
             preset.pipeline.add_pass("loop_invariant_code_motion_pass", loop_invariant_code_motion_pass{});
+            preset.pipeline.add_pass("proof_gated_load_licm_pass", proof_gated_load_licm_pass{});
             preset.pipeline.add_pass("affine_induction_strength_reduction_pass",
                                      affine_induction_strength_reduction_pass{});
             preset.pipeline.add_pass("constant_propagation_pass", constant_propagation_pass{});
@@ -7157,6 +7366,13 @@ namespace lithe::codegen {
                     != block.instructions.end();
             });
         };
+        const auto instruction_by_id = [&](const std::uint32_t id) -> const allocated_instruction* {
+            for (const auto& block : fn.function.blocks) {
+                const auto found = std::ranges::find(block.instructions, id, &allocated_instruction::id);
+                if (found != block.instructions.end()) return std::addressof(*found);
+            }
+            return nullptr;
+        };
         for (const auto& loop : fn.canonical_loops) {
             if (!has_block(loop.preheader_block) || !has_block(loop.header_block)
                 || !has_block(loop.latch_block) || !has_block(loop.exit_block)
@@ -7173,6 +7389,19 @@ namespace lithe::codegen {
                     && has_instruction(address.address_instruction) && address.stride_bytes != 0;
             if (!known_loop || !valid_shape) {
                 out.diagnostics.push_back("physical MIR has an invalid affine address descriptor");
+            }
+        }
+        for (const auto& proof : fn.invariant_loads) {
+            const bool known_loop = std::ranges::find(fn.canonical_loops, proof.loop_header_block,
+                &mir::canonical_loop_descriptor::header_block) != fn.canonical_loops.end();
+            const auto* load = instruction_by_id(proof.load_instruction);
+            const bool valid_load = load != nullptr && load->op == opcode::load
+                && load->defs.size() == 1 && load->defs.front().type == allocated_operand::kind::preg
+                && load->uses.size() == 1 && load->uses.front().type == allocated_operand::kind::memory;
+            const bool complete_proof = proof.address_invariant && proof.non_trapping
+                && proof.alias_proof != mir::load_motion_alias_proof::unknown;
+            if (!known_loop || !valid_load || !complete_proof) {
+                out.diagnostics.push_back("physical MIR has an invalid invariant load-motion proof");
             }
         }
 
