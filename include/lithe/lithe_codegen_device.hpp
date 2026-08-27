@@ -86,6 +86,7 @@ namespace lithe::codegen::device {
         std::vector<kernel_binding> bindings;
         launch_geometry launch{};
         kernel_requirements requirements{};
+        hl::loop_legality_summary legality{};
         std::optional<scalar_type> element_type;
         std::uint64_t identity = 0;
         std::vector<std::string> diagnostics;
@@ -112,6 +113,10 @@ namespace lithe::codegen::device {
             return valid() && !requirements.reduction && !requirements.control_flow
                 && !requirements.atomics && !requirements.workgroup_memory
                 && !requirements.non_contiguous_memory
+                && legality.rank_one && legality.canonical_counted
+                && legality.regular_stride && legality.all_memrefs_contiguous
+                && legality.uniform_memory_element_type
+                && !legality.possible_in_place_dependency
                 && writable_binding_count() == 1
                 && std::ranges::none_of(bindings, [](const kernel_binding& binding) {
                     return binding.access == binding_access::read_write;
@@ -200,20 +205,18 @@ namespace lithe::codegen::device {
             return plan;
         }
 
-        const auto& loop = std::get<hl::structured_for_attr>(plan.root->attr);
-        plan.requirements.loop_carried_values = !plan.root->operands.empty()
-            || !plan.root->results.empty();
-        plan.requirements.reduction |= plan.requirements.loop_carried_values;
-        if (loop.rank != 1) {
+        plan.legality = hl::summarize_loop_legality(*plan.root);
+        plan.requirements.loop_carried_values = plan.legality.has_loop_carried_values;
+        plan.requirements.reduction = plan.legality.has_reduction;
+        plan.requirements.control_flow = plan.legality.has_control_flow;
+        if (!plan.legality.rank_one) {
             plan.diagnostics.push_back("device: initial shared lowering supports one-dimensional parallel roots");
         }
-        if (loop.bounds_known && loop.bounds[0].step > 0 && loop.bounds[0].upper > loop.bounds[0].lower) {
-            const auto extent = static_cast<std::uint64_t>(loop.bounds[0].upper - loop.bounds[0].lower);
-            const auto step = static_cast<std::uint64_t>(loop.bounds[0].step);
-            plan.launch.global_x = static_cast<std::uint32_t>((extent + step - 1) / step);
+        if (plan.legality.rank_one && plan.legality.static_trip_count) {
+            plan.launch.global_x = static_cast<std::uint32_t>(plan.legality.trip_count);
         }
-        else if (loop.trip_count_hint > 0) {
-            plan.launch.global_x = static_cast<std::uint32_t>(loop.trip_count_hint);
+        else if (plan.legality.rank_one && plan.legality.trip_count > 0) {
+            plan.launch.global_x = static_cast<std::uint32_t>(plan.legality.trip_count);
         }
         else {
             plan.launch.dynamic_global_x = true;

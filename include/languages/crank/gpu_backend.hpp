@@ -274,6 +274,9 @@ namespace crank {
     using gpu_provider = lithe::codegen::backends::device_provider;
     using gpu_f32_tensor = lithe::codegen::backends::metal_f32_tensor;
     using gpu_device_submission = lithe::codegen::backends::metal_device_submission;
+#if defined(LITHE_VULKAN_BACKEND_AVAILABLE) && LITHE_VULKAN_BACKEND_AVAILABLE
+    using gpu_vulkan_f32_tensor = ::pravaha::backends::vulkan::vulkan_device_tensor<float>;
+#endif
 
     // ============================================================================
     // gpu_backend — capability probe + elementwise SPIR-V compile/install/dispatch.
@@ -453,6 +456,25 @@ namespace crank {
             };
             const auto dispatched = ::pravaha::backends::vulkan::dispatch_elementwise_full<float, 2>(
                 module.identity_hash(), module, destination, sources, module.local_x);
+            if (!dispatched)
+                return {gpu_dispatch_status::no_device, dispatched.error().message};
+            return {gpu_dispatch_status::ok, {}};
+        }
+
+        [[nodiscard]] gpu_dispatch_result
+        dispatch_vulkan_device(
+            const lithe::codegen::device::kernel_plan& plan,
+            gpu_vulkan_f32_tensor& output,
+            const std::array<const gpu_vulkan_f32_tensor*, 2>& inputs) const {
+            if (!supports(plan))
+                return {gpu_dispatch_status::unsupported_shape,
+                        "gpu: unsupported HL-MIR Vulkan kernel"};
+            auto module = compile_elementwise(plan, gpu_elementwise_op::add);
+            if (module.validate() != lithe::ir::ir_resolution_state::resolved)
+                return {gpu_dispatch_status::unsupported_shape,
+                        "gpu: shared-plan SPIR-V validation failed"};
+            const auto dispatched = ::pravaha::backends::vulkan::dispatch_elementwise_device<float, 2>(
+                module.identity_hash(), module, output, inputs, module.local_x);
             if (!dispatched)
                 return {gpu_dispatch_status::no_device, dispatched.error().message};
             return {gpu_dispatch_status::ok, {}};

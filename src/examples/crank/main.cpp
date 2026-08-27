@@ -29,7 +29,9 @@ int main(const int argc, char* argv[]) {
     }
 
     if (command == "--benchmark-gpu") {
-        return crank_ex::ex36_e2e_gpu_elementwise(/*benchmark_backends=*/true) ? 0 : 2;
+        const auto result = crank_ex::ex36_e2e_gpu_elementwise(/*benchmark_backends=*/true);
+        lg::log::flush();
+        return result ? 0 : 2;
     }
 
     return examples::run_by_name(command);

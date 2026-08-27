@@ -293,6 +293,31 @@ namespace lithe::codegen::hl {
 
             const auto& fa = std::get<structured_for_attr>(first->attr);
             const auto& sa = std::get<structured_for_attr>(second->attr);
+            const auto first_legality = summarize_loop_legality(*first);
+            const auto second_legality = summarize_loop_legality(*second);
+
+            if (!first_legality.canonical_counted || !second_legality.canonical_counted) {
+                out.diagnostic = "fusion: both loops require canonical counted bounds";
+                return out;
+            }
+            if (first_legality.is_parallel != second_legality.is_parallel) {
+                out.diagnostic = "fusion: parallel execution mode mismatch";
+                return out;
+            }
+            if (first_legality.has_loop_carried_values || second_legality.has_loop_carried_values
+                || first_legality.has_reduction || second_legality.has_reduction) {
+                out.diagnostic = "fusion: loop-carried values and reductions require dependence lowering";
+                return out;
+            }
+            if (first_legality.has_control_flow || second_legality.has_control_flow) {
+                out.diagnostic = "fusion: control flow requires region normalization";
+                return out;
+            }
+            if (first_legality.possible_in_place_dependency
+                || second_legality.possible_in_place_dependency) {
+                out.diagnostic = "fusion: possible in-place memory dependency";
+                return out;
+            }
 
             // Legality: ranks and all bounds must match.
             if (fa.rank != sa.rank) {
@@ -485,13 +510,15 @@ namespace lithe::codegen::hl {
     };
 
     // -------------------------------------------------------------------------
-    // vectorization_pass — annotate is_parallel structured_for dims as vectorizable
-    //   Stub: marks vector_width on the op's memref attrs; actual SIMD emission
-    //   is delegated to the backend (e.g. HostSimdBackend in pravaha_hetero).
+    // vectorization_pass — identify conservatively vectorizable parallel loops.
+    //   It never upgrades a memref's declared alignment: that value is a layout
+    //   guarantee, not an optimization hint. Actual SIMD emission remains a
+    //   backend decision and can consume summarize_loop_legality() directly.
     // -------------------------------------------------------------------------
 
     struct vectorization_result {
         std::size_t dims_annotated = 0;
+        std::size_t loops_rejected = 0;
         std::string diagnostic;
     };
 
@@ -507,23 +534,26 @@ namespace lithe::codegen::hl {
                             std::holds_alternative<structured_for_attr>(op->attr)) {
                             auto& sf = std::get<structured_for_attr>(op->attr);
                             if (sf.is_parallel) {
-                                // Annotate memref_store ops in inner body with alignment hint.
-                                for (std::size_t ri = 0; ri < op->regions.size(); ++ri) {
-                                    if (!op->regions[ri]) continue;
-                                    for (hl_block* ib = op->regions[ri]->blocks.head;
-                                         ib; ib = ib->list_node.next) {
-                                        for (hl_operation* iop = ib->ops.head;
-                                             iop; iop = iop->list_node.next) {
-                                            if ((iop->op == hl_opcode::memref_load ||
-                                                    iop->op == hl_opcode::memref_store) &&
-                                                std::holds_alternative<memref_attr>(iop->attr)) {
-                                                auto& ma = std::get<memref_attr>(iop->attr);
-                                                ma.view.alignment_bytes =
-                                                    static_cast<std::uint16_t>(preferred_vector_width / 8);
-                                                ++out.dims_annotated;
-                                            }
-                                        }
-                                    }
+                                const auto legality = summarize_loop_legality(*op);
+                                const auto requested_alignment = preferred_vector_width / 8;
+                                const bool eligible = legality.rank_one
+                                    && legality.canonical_counted
+                                    && legality.regular_stride
+                                    && legality.all_memrefs_contiguous
+                                    && legality.uniform_memory_element_type
+                                    && !legality.has_loop_carried_values
+                                    && !legality.has_reduction
+                                    && !legality.has_control_flow
+                                    && !legality.possible_in_place_dependency
+                                    && legality.minimum_alignment_bytes >= requested_alignment;
+                                if (eligible) {
+                                    // Preserve the observed regular-stride fact for consumers
+                                    // that only inspect the structured loop attribute.
+                                    sf.stride_regular = true;
+                                    ++out.dims_annotated;
+                                }
+                                else {
+                                    ++out.loops_rejected;
                                 }
                             }
                         }
@@ -533,6 +563,8 @@ namespace lithe::codegen::hl {
                 }
             };
             visit(visit, fn.body_region);
+            if (out.dims_annotated == 0 && out.loops_rejected != 0)
+                out.diagnostic = "vectorization: no parallel loop met the conservative SIMD legality requirements";
             return out;
         }
     };

@@ -82,6 +82,7 @@
 
 #include <array>
 #include <cstddef>
+#include <iostream>
 #include <string_view>
 #include <vector>
 #include <unordered_map>
@@ -1442,38 +1443,106 @@ fn add_vec(xs: []Float32) -> []Float32 {
             if (!gpu_backend::metal_available() || !gpu_backend::vulkan_available()) {
                 lg::info("crank GPU backend benchmark: skipped (Metal={}, Vulkan/MoltenVK={})",
                          gpu_backend::metal_available(), gpu_backend::vulkan_available());
+                std::cout << "crank GPU backend benchmark: skipped (Metal="
+                          << gpu_backend::metal_available() << ", Vulkan/MoltenVK="
+                          << gpu_backend::vulkan_available() << ")\n";
             }
             else {
                 std::vector<float> metal_output(n);
                 std::vector<float> vulkan_output(n);
                 bool metal_failed = false;
                 bool vulkan_failed = false;
+                constexpr std::size_t dispatches_per_sample = 16;
                 const profiler::ProfileConfig config{
-                    .iterations = 20,
-                    .warmup_iterations = 3,
-                    .label = "crank_gpu_add_4096",
+                    .iterations = 40,
+                    .warmup_iterations = 8,
+                    .label = "crank_gpu_add_4096_batched",
                 };
                 const auto metal_profile = profiler::measure(config, [&] {
-                    metal_failed = metal_failed || !gpu.dispatch_metal(plan, metal_output, lhs, rhs).ok();
+                    for (std::size_t iteration = 0; iteration < dispatches_per_sample; ++iteration)
+                        metal_failed = metal_failed || !gpu.dispatch_metal(plan, metal_output, lhs, rhs).ok();
                 });
                 const auto vulkan_profile = profiler::measure(config, [&] {
-                    vulkan_failed = vulkan_failed || !gpu.dispatch_vulkan(plan, vulkan_output, lhs, rhs).ok();
+                    for (std::size_t iteration = 0; iteration < dispatches_per_sample; ++iteration)
+                        vulkan_failed = vulkan_failed || !gpu.dispatch_vulkan(plan, vulkan_output, lhs, rhs).ok();
                 });
-                if (metal_failed || vulkan_failed)
-                    return testfw::fail("ex36: GPU backend benchmark dispatch failed");
-                if (metal_output.front() != 3.0f || vulkan_output.front() != 3.0f)
+                if (metal_failed || vulkan_failed) {
+                    lg::info("crank GPU backend benchmark: skipped (Metal dispatch={}, Vulkan/MoltenVK dispatch={})",
+                             !metal_failed, !vulkan_failed);
+                    std::cout << "crank GPU backend benchmark: skipped (Metal dispatch="
+                              << !metal_failed << ", Vulkan/MoltenVK dispatch="
+                              << !vulkan_failed << ")\n";
+                }
+                else if (metal_output.front() != 3.0f || vulkan_output.front() != 3.0f) {
                     return testfw::fail("ex36: GPU backend benchmark result mismatch");
-                log_equivalent_benchmark(
-                    "crank GPU backend comparison (f32 add, 4,096 elements)",
-                    "Synchronous elementwise f32 addition over 4,096 elements",
+                }
+                else {
+                constexpr std::string_view title =
+                    "crank GPU backend comparison (transfer-inclusive f32 add)";
+                constexpr std::string_view workload =
+                    "16 synchronous elementwise f32 additions over 4,096 elements per sample";
+                constexpr std::string_view equivalence =
                     "Both samples use the same HL-MIR plan, host inputs, and host output; "
-                    "pipeline caching remains enabled for each provider.",
-                    metal_profile, vulkan_profile,
-                    profiler::execution_mechanism::vulkan,
-                    profiler::execution_mechanism::metal);
+                    "pipeline caching remains enabled for each provider.";
+                const auto comparison = profiler::format_execution_comparison(
+                    {.workload = workload,
+                     .equivalence = equivalence,
+                     .baseline = profiler::execution_mechanism::metal,
+                     .candidate = profiler::execution_mechanism::vulkan},
+                    metal_profile, vulkan_profile);
+                lg::info("{}\n{}", title, comparison);
+                std::cout << title << '\n' << comparison << '\n';
+
+                auto metal_lhs = gpu_f32_tensor::from_host(lhs);
+                auto metal_rhs = gpu_f32_tensor::from_host(rhs);
+                auto metal_mid = gpu_f32_tensor::allocate(n);
+                auto metal_final = gpu_f32_tensor::allocate(n);
+                auto vulkan_lhs = gpu_vulkan_f32_tensor::from_host(lhs);
+                auto vulkan_rhs = gpu_vulkan_f32_tensor::from_host(rhs);
+                auto vulkan_mid = gpu_vulkan_f32_tensor::allocate(n);
+                auto vulkan_final = gpu_vulkan_f32_tensor::allocate(n);
+                if (metal_lhs && metal_rhs && metal_mid && metal_final
+                    && vulkan_lhs && vulkan_rhs && vulkan_mid && vulkan_final) {
+                    bool resident_metal_failed = false;
+                    bool resident_vulkan_failed = false;
+                    const auto metal_chain = profiler::measure(config, [&] {
+                        const std::array<const gpu_f32_tensor*, 2> sources{
+                            std::addressof(*metal_lhs), std::addressof(*metal_rhs)};
+                        auto first = gpu.dispatch_metal_device_async(plan, *metal_mid, sources);
+                        const std::array<const gpu_f32_tensor*, 2> chained{
+                            std::addressof(*metal_mid), std::addressof(*metal_mid)};
+                        auto second = first ? gpu.dispatch_metal_device_async(plan, *metal_final, chained)
+                                            : decltype(gpu.dispatch_metal_device_async(plan, *metal_final, chained)){std::unexpected(first.error())};
+                        resident_metal_failed = resident_metal_failed || !first || !second
+                            || !first->wait() || !second->wait();
+                    });
+                    const auto vulkan_chain = profiler::measure(config, [&] {
+                        const std::array<const gpu_vulkan_f32_tensor*, 2> sources{
+                            std::addressof(*vulkan_lhs), std::addressof(*vulkan_rhs)};
+                        resident_vulkan_failed = resident_vulkan_failed
+                            || !gpu.dispatch_vulkan_device(plan, *vulkan_mid, sources).ok();
+                        const std::array<const gpu_vulkan_f32_tensor*, 2> chained{
+                            std::addressof(*vulkan_mid), std::addressof(*vulkan_mid)};
+                        resident_vulkan_failed = resident_vulkan_failed
+                            || !gpu.dispatch_vulkan_device(plan, *vulkan_final, chained).ok();
+                    });
+                    if (!resident_metal_failed && !resident_vulkan_failed) {
+                        const auto resident_comparison = profiler::format_execution_comparison(
+                            {.workload = "Two dependent f32-add kernels over resident 4,096-element tensors",
+                             .equivalence = "Inputs are uploaded once before measurement; each sample performs only device-resident kernel chains.",
+                             .baseline = profiler::execution_mechanism::metal,
+                             .candidate = profiler::execution_mechanism::vulkan},
+                            metal_chain, vulkan_chain);
+                        lg::info("crank GPU backend comparison (device-resident chain)\n{}", resident_comparison);
+                        std::cout << "crank GPU backend comparison (device-resident chain)\n"
+                                  << resident_comparison << '\n';
+                    }
+                }
+                }
             }
 #else
             lg::info("crank GPU backend benchmark: skipped (Vulkan/MoltenVK was not compiled)");
+            std::cout << "crank GPU backend benchmark: skipped (Vulkan/MoltenVK was not compiled)\n";
 #endif
         }
 

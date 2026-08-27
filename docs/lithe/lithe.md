@@ -1718,6 +1718,15 @@ auto m = memref_type::row_major(abstract_value_kind::floating, 64, 2, {1024, 102
 // m.strides = {1024, 1}  (row-major auto-computed)
 ```
 
+#### `loop_legality_summary`
+
+`summarize_loop_legality(loop)` derives reusable facts for optimizers and
+backends without enlarging persisted HL-MIR. It reports canonical counted-loop
+and trip-count facts, memory read/write counts, contiguity, static shape,
+minimum alignment, uniform element type, reductions, control flow, and a
+conservative possible in-place dependency. `device::kernel_plan` retains this
+summary so device emitters consume the same legality result as HL passes.
+
 #### `task_decomposition_plan`
 
 Trivially copyable C-ABI POD. Zero dependency on any task runtime (no Pravaha/Sutra headers required).
@@ -1743,7 +1752,7 @@ All passes are structs with `run()` — no `std::function`, no virtuals.
 | `pre_header_isolation`       | Split blocks so every `structured_for` is the sole op in its enclosing block; prerequisite for safe `region_fusion_pass`                                                                                                      |
 | `region_fusion_pass`         | Fuse two equal-bound `structured_for` ops (O(1) intrusive-list splice)                                                                                                                                                        |
 | `loop_tiling_pass`           | Tile a `structured_for` into outer+inner nest                                                                                                                                                                                 |
-| `vectorization_pass`         | Annotate parallel dims with SIMD alignment hint (stub for backends)                                                                                                                                                           |
+| `vectorization_pass`         | Conservatively identifies canonical rank-1 parallel loops with compatible layout/alignment; never upgrades a memref's declared alignment                                                                                         |
 | `coordinate_lowering_pass`   | HL → flat: expand loops + memref address arithmetic; sub-byte (`elem_bits < 8`) elements use bit-offset arithmetic + read-modify-write masking; MLIR-style `block_args` lowered to fresh physical registers via `ssa_to_preg` |
 | `task_plan_extraction_pass`  | Extract `task_decomposition_plan` from `is_parallel` ops                                                                                                                                                                      |
 

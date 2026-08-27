@@ -13,6 +13,8 @@
 
 #include "mem/arena.hpp"
 
+#include <limits>
+
 namespace lithe::codegen::hl {
     // -------------------------------------------------------------------------
     // 1. hl_opcode — high-level / structured dialect
@@ -521,7 +523,162 @@ namespace lithe::codegen::hl {
     };
 
     // -------------------------------------------------------------------------
-    // 11. arena_checkpoint_guard — RAII rollback for speculative passes
+    // 11. loop_legality_summary — opt-in facts for optimization and backends
+    //
+    // This is deliberately derived rather than stored in HL-MIR: consumers that
+    // do not need legality information pay neither persistent IR space nor an
+    // analysis cost.  The facts are conservative; in particular, a shared SSA
+    // base for a load and a store is treated as a possible in-place dependency.
+    // -------------------------------------------------------------------------
+
+    struct loop_legality_summary {
+        bool is_parallel = false;
+        bool canonical_counted = false;
+        bool rank_one = false;
+        bool static_trip_count = false;
+        bool regular_stride = false;
+        bool has_loop_carried_values = false;
+        bool has_reduction = false;
+        bool has_control_flow = false;
+        bool all_memrefs_contiguous = true;
+        bool all_memrefs_static_shape = true;
+        bool uniform_memory_element_type = true;
+        bool possible_in_place_dependency = false;
+        std::uint64_t trip_count = 0;
+        std::uint32_t minimum_alignment_bytes = 0;
+        std::uint32_t memory_reads = 0;
+        std::uint32_t memory_writes = 0;
+    };
+
+    namespace detail {
+        inline void summarize_loop_region(const hl_region& region,
+                                          loop_legality_summary& summary,
+                                          std::array<ssa_value_id, 16>& read_bases,
+                                          std::size_t& read_base_count,
+                                          std::array<ssa_value_id, 16>& write_bases,
+                                          std::size_t& write_base_count,
+                                          abstract_value_kind& element_kind,
+                                          std::uint32_t& element_bits,
+                                          bool& has_element_type) noexcept {
+            for (auto* block = region.blocks.head; block != nullptr; block = block->list_node.next) {
+                for (auto* op = block->ops.head; op != nullptr; op = op->list_node.next) {
+                    summary.has_reduction |= op->op == hl_opcode::structured_reduce;
+                    summary.has_control_flow |= op->op == hl_opcode::branch
+                        || op->op == hl_opcode::branch_cond;
+
+                    const bool is_load = op->op == hl_opcode::memref_load;
+                    const bool is_store = op->op == hl_opcode::memref_store;
+                    if ((is_load || is_store) && std::holds_alternative<memref_attr>(op->attr)) {
+                        const auto& attr = std::get<memref_attr>(op->attr);
+                        const auto& view = attr.view;
+                        summary.all_memrefs_contiguous &= view.contiguous;
+                        summary.all_memrefs_static_shape &= view.fully_static();
+                        summary.minimum_alignment_bytes = summary.minimum_alignment_bytes == 0
+                            ? view.alignment_bytes
+                            : std::min(summary.minimum_alignment_bytes,
+                                       static_cast<std::uint32_t>(view.alignment_bytes));
+                        if (has_element_type) {
+                            summary.uniform_memory_element_type &= element_kind == view.elem_kind
+                                && element_bits == view.elem_bits;
+                        }
+                        else {
+                            element_kind = view.elem_kind;
+                            element_bits = view.elem_bits;
+                            has_element_type = true;
+                        }
+
+                        if (attr.base_operand_index >= 0
+                            && static_cast<std::size_t>(attr.base_operand_index) < op->operands.size()) {
+                            const auto base = op->operands[static_cast<std::size_t>(attr.base_operand_index)];
+                            const auto contains = [base](const auto& values, const std::size_t count) noexcept {
+                                const std::span<const ssa_value_id> prefix{values.data(), count};
+                                return std::ranges::find(prefix, base) != prefix.end();
+                            };
+                            if (is_load) {
+                                ++summary.memory_reads;
+                                summary.possible_in_place_dependency |= contains(write_bases, write_base_count);
+                                if (read_base_count < read_bases.size() && !contains(read_bases, read_base_count))
+                                    read_bases[read_base_count++] = base;
+                                else if (!contains(read_bases, read_base_count))
+                                    summary.possible_in_place_dependency = true;
+                            }
+                            else {
+                                ++summary.memory_writes;
+                                summary.possible_in_place_dependency |= contains(read_bases, read_base_count);
+                                if (write_base_count < write_bases.size() && !contains(write_bases, write_base_count))
+                                    write_bases[write_base_count++] = base;
+                                else if (!contains(write_bases, write_base_count))
+                                    summary.possible_in_place_dependency = true;
+                            }
+                        }
+                    }
+
+                    for (const auto* nested : op->regions) {
+                        if (nested != nullptr) {
+                            summarize_loop_region(*nested, summary, read_bases, read_base_count,
+                                                  write_bases, write_base_count, element_kind,
+                                                  element_bits, has_element_type);
+                        }
+                    }
+                }
+            }
+        }
+    } // namespace detail
+
+    [[nodiscard]] inline loop_legality_summary summarize_loop_legality(
+        const hl_operation& loop) noexcept {
+        loop_legality_summary summary;
+        if ((loop.op != hl_opcode::structured_for && loop.op != hl_opcode::structured_reduce)
+            || !std::holds_alternative<structured_for_attr>(loop.attr)) return summary;
+
+        const auto& attr = std::get<structured_for_attr>(loop.attr);
+        summary.is_parallel = attr.is_parallel;
+        summary.rank_one = attr.rank == 1;
+        summary.has_loop_carried_values = !loop.operands.empty() || !loop.results.empty();
+        summary.has_reduction = loop.op == hl_opcode::structured_reduce || summary.has_loop_carried_values;
+        summary.regular_stride = attr.stride_regular;
+
+        bool valid_bounds = attr.rank > 0 && attr.rank <= structured_for_attr::max_ivs;
+        std::uint64_t trip_count = 1;
+        for (std::uint8_t dimension = 0; valid_bounds && dimension < attr.rank; ++dimension) {
+            const auto& bounds = attr.bounds[dimension];
+            valid_bounds = bounds.lower_known && bounds.upper_known && bounds.step_known
+                && bounds.step > 0 && bounds.upper >= bounds.lower;
+            if (!valid_bounds) break;
+            const auto extent = static_cast<std::uint64_t>(bounds.upper - bounds.lower);
+            const auto step = static_cast<std::uint64_t>(bounds.step);
+            const auto dimension_trip_count = (extent + step - 1) / step;
+            if (dimension_trip_count != 0
+                && trip_count > std::numeric_limits<std::uint64_t>::max() / dimension_trip_count) {
+                valid_bounds = false;
+                break;
+            }
+            trip_count *= dimension_trip_count;
+        }
+        summary.canonical_counted = valid_bounds;
+        summary.static_trip_count = valid_bounds;
+        summary.trip_count = valid_bounds ? trip_count : attr.trip_count_hint;
+        summary.regular_stride |= valid_bounds;
+
+        std::array<ssa_value_id, 16> read_bases{};
+        std::array<ssa_value_id, 16> write_bases{};
+        std::size_t read_base_count = 0;
+        std::size_t write_base_count = 0;
+        abstract_value_kind element_kind{};
+        std::uint32_t element_bits = 0;
+        bool has_element_type = false;
+        for (const auto* region : loop.regions) {
+            if (region != nullptr) {
+                detail::summarize_loop_region(*region, summary, read_bases, read_base_count,
+                                              write_bases, write_base_count, element_kind,
+                                              element_bits, has_element_type);
+            }
+        }
+        return summary;
+    }
+
+    // -------------------------------------------------------------------------
+    // 12. arena_checkpoint_guard — RAII rollback for speculative passes
     // -------------------------------------------------------------------------
 
     struct arena_checkpoint_guard {
