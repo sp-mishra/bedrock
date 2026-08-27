@@ -1807,6 +1807,13 @@ not select a provider, retain artifacts, or run as part of normal execution.
 warm samples into the existing feedback store, making them available to an
 adaptive cost model without making benchmark collection part of compilation.
 
+`execution_cost_input` keeps selection deterministic while representing the
+actual workload: work items, data bytes, device-transfer bytes, cache state,
+and access locality. Per-provider costs may distinguish cold from warm setup,
+streaming from reusable data-byte work, and accelerator transfer. Provider
+availability remains a caller-supplied fact, so portable Lithe does not include or probe Metal,
+Vulkan, or JIT facilities merely to rank candidates.
+
 The Highway SIMD backend consumes a proven `vector_plan` through
 `bind_vector_plan`. It accepts only materialized f32 elementwise plans with a
 whole-vector or scalar-epilogue tail, then maps the target-neutral plan to the

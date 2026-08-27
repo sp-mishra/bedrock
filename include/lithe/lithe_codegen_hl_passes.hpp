@@ -745,10 +745,40 @@ namespace lithe::codegen::hl {
         bool available = false;
         std::uint64_t setup_cost_ns = 0;
         std::uint64_t work_item_cost_ns = 0;
+        std::uint64_t cached_setup_cost_ns = 0;
+        std::uint64_t data_byte_cost_ns = 0;
+        std::uint64_t reusable_data_byte_cost_ns = 0;
+        std::uint64_t transfer_byte_cost_ns = 0;
+    };
+
+    enum class execution_cache_state : std::uint8_t {
+        unknown,
+        cold,
+        warm
+    };
+
+    enum class execution_access_locality : std::uint8_t {
+        unknown,
+        streaming,
+        reusable
+    };
+
+    // Pure workload facts shared by language adapters and Lithe selection.
+    // They do not discover providers or retain feedback; callers supply those
+    // optional decisions through candidate availability and policy.
+    struct execution_cost_input {
+        std::uint64_t work_items = 0;
+        std::uint64_t data_bytes = 0;
+        std::uint64_t device_transfer_bytes = 0;
+        execution_cache_state cache = execution_cache_state::unknown;
+        execution_access_locality locality = execution_access_locality::unknown;
     };
 
     struct execution_selection_inputs {
+        // Compatibility shorthand for existing callers. New callers should
+        // populate workload so transfer and cache facts travel together.
         std::uint64_t work_items = 0;
+        execution_cost_input workload{};
         bool vector_legal = false;
         bool accelerator_legal = false;
         std::array<execution_candidate_cost, 5> candidates{};
@@ -793,13 +823,44 @@ namespace lithe::codegen::hl {
         return false;
     }
 
+    [[nodiscard]] constexpr std::uint64_t saturating_cost_add(
+        const std::uint64_t lhs, const std::uint64_t rhs) noexcept {
+        return rhs > std::numeric_limits<std::uint64_t>::max() - lhs
+            ? std::numeric_limits<std::uint64_t>::max() : lhs + rhs;
+    }
+
+    [[nodiscard]] constexpr std::uint64_t saturating_cost_product(
+        const std::uint64_t lhs, const std::uint64_t rhs) noexcept {
+        if (lhs != 0 && rhs > std::numeric_limits<std::uint64_t>::max() / lhs)
+            return std::numeric_limits<std::uint64_t>::max();
+        return lhs * rhs;
+    }
+
+    [[nodiscard]] constexpr std::uint64_t estimated_execution_cost(
+        const execution_candidate_cost& candidate,
+        const execution_cost_input& input) noexcept {
+        const auto setup = input.cache == execution_cache_state::warm
+                && candidate.cached_setup_cost_ns != 0
+            ? candidate.cached_setup_cost_ns : candidate.setup_cost_ns;
+        auto total = saturating_cost_add(setup,
+            saturating_cost_product(candidate.work_item_cost_ns, input.work_items));
+        const auto data_byte_cost = input.locality == execution_access_locality::reusable
+                && candidate.reusable_data_byte_cost_ns != 0
+            ? candidate.reusable_data_byte_cost_ns : candidate.data_byte_cost_ns;
+        total = saturating_cost_add(total,
+            saturating_cost_product(data_byte_cost, input.data_bytes));
+        const bool accelerator = candidate.kind == planned_execution_kind::metal
+            || candidate.kind == planned_execution_kind::vulkan;
+        if (accelerator) {
+            total = saturating_cost_add(total,
+                saturating_cost_product(candidate.transfer_byte_cost_ns, input.device_transfer_bytes));
+        }
+        return total;
+    }
+
     [[nodiscard]] constexpr std::uint64_t estimated_execution_cost(
         const execution_candidate_cost& candidate, const std::uint64_t work_items) noexcept {
-        if (candidate.work_item_cost_ns != 0
-            && work_items > (std::numeric_limits<std::uint64_t>::max() - candidate.setup_cost_ns)
-                / candidate.work_item_cost_ns)
-            return std::numeric_limits<std::uint64_t>::max();
-        return candidate.setup_cost_ns + candidate.work_item_cost_ns * work_items;
+        return estimated_execution_cost(candidate, execution_cost_input{.work_items = work_items});
     }
 
     template <bool Observe = false, class Observer = observability::null_observer>
@@ -807,6 +868,8 @@ namespace lithe::codegen::hl {
         const execution_selection_inputs& inputs,
         const execution_selection_policy& policy = {},
         Observer* observer = nullptr) noexcept {
+        auto workload = inputs.workload;
+        if (workload.work_items == 0) workload.work_items = inputs.work_items;
         const auto candidate_for = [&](const planned_execution_kind kind) -> const execution_candidate_cost* {
             const auto found = std::ranges::find(inputs.candidates, kind, &execution_candidate_cost::kind);
             return found == inputs.candidates.end() ? nullptr : std::addressof(*found);
@@ -819,7 +882,7 @@ namespace lithe::codegen::hl {
             const auto* forced = candidate_for(*policy.force);
             if (forced != nullptr && forced->available && execution_candidate_legal(forced->kind, inputs, policy)) {
                 out.selected = forced->kind;
-                out.estimated_cost_ns = estimated_execution_cost(*forced, inputs.work_items);
+                out.estimated_cost_ns = estimated_execution_cost(*forced, workload);
                 out.forced = true;
                 out.evaluated_candidates = 1;
             } else {
@@ -831,7 +894,7 @@ namespace lithe::codegen::hl {
             for (const auto& candidate : inputs.candidates) {
                 if (!candidate.available || !execution_candidate_legal(candidate.kind, inputs, policy)) continue;
                 ++out.evaluated_candidates;
-                const auto cost = estimated_execution_cost(candidate, inputs.work_items);
+                const auto cost = estimated_execution_cost(candidate, workload);
                 // Array order is the deterministic tie-break: interpreter, JIT,
                 // SIMD, Metal, Vulkan. On macOS callers place Metal before Vulkan.
                 if (cost < best_cost) { best_cost = cost; out.selected = candidate.kind; }
@@ -841,7 +904,8 @@ namespace lithe::codegen::hl {
         }
         if constexpr (Observe) {
             if (observer != nullptr) observability::emit<true>(*observer, execution_selection_event{
-                out.selected, inputs.work_items, out.estimated_cost_ns, out.evaluated_candidates, out.fell_back});
+                out.selected, workload.work_items, out.estimated_cost_ns,
+                out.evaluated_candidates, out.fell_back});
         }
         return out;
     }

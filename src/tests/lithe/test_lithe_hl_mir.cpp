@@ -980,3 +980,42 @@ TEST_CASE (
     static_cast<void>(select_execution_plan<true>(inputs, {}, &sink));
     REQUIRE(sink.events == 1);
 }
+
+TEST_CASE (
+"select_execution_plan: cache, locality and transfer costs affect deterministic ranking",
+"[lithe][execution][cost][phase-d]"
+) {
+    execution_selection_inputs inputs;
+    inputs.workload = {
+        .work_items = 1'000,
+        .data_bytes = 4'000,
+        .device_transfer_bytes = 4'000,
+        .cache = execution_cache_state::warm,
+        .locality = execution_access_locality::streaming,
+    };
+    inputs.accelerator_legal = true;
+    inputs.candidates = {{
+        {planned_execution_kind::interpreter, true, 0, 5},
+        {planned_execution_kind::jit, true, 10'000, 2, 100, 0, 0},
+        {planned_execution_kind::simd, false, 0, 0},
+        {planned_execution_kind::metal, true, 100, 1, 10, 0, 0, 2},
+        {planned_execution_kind::vulkan, false, 0, 0},
+    }};
+
+    const auto selected = select_execution_plan(inputs);
+
+    REQUIRE(selected.selected == planned_execution_kind::jit);
+    REQUIRE(selected.estimated_cost_ns == 2'100);
+
+    const execution_candidate_cost locality_candidate{
+        .kind = planned_execution_kind::simd,
+        .available = true,
+        .data_byte_cost_ns = 5,
+        .reusable_data_byte_cost_ns = 1,
+    };
+    const execution_cost_input reusable_data{
+        .data_bytes = 64,
+        .locality = execution_access_locality::reusable,
+    };
+    REQUIRE(estimated_execution_cost(locality_candidate, reusable_data) == 64);
+}
