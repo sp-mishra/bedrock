@@ -175,6 +175,40 @@ namespace lithe::codegen::backends {
         }
     };
 
+    enum class spirv_binary_operation : std::uint8_t { add, multiply };
+
+    // Generic three-buffer f32 ABI: output[i] = lhs[i] op rhs[i]. The distinct
+    // block types preserve MoltenVK/SPIRV-Cross binding behaviour.
+    [[nodiscard]] inline spirv_module emit_spirv_binary_elementwise(
+        const spirv_binary_operation operation, const std::uint32_t local_x = 64) {
+        using word = std::uint32_t;
+        constexpr word main = 1, void_t = 2, fn = 3, uint_t = 4, float_t = 5, v3uint = 6,
+            ptr_in_v3 = 7, giid = 8, uint0 = 9, ptr_in_uint = 10, pgiid = 11,
+            array = 12, sa = 13, sb = 14, sc = 15, ptra = 16, ptrb = 17, ptrc = 18,
+            a = 19, b = 20, c = 21, ptrf = 22, int_t = 23, int0 = 24, label = 25,
+            index = 26, pa = 27, pb = 28, pc = 29, va = 30, vb = 31, result = 32, bound = 33;
+        std::vector<word> w{0x07230203u, 0x00010000u, 0u, bound, 0u};
+        const auto emit = [&w](word op, std::initializer_list<word> args) {
+            w.push_back((static_cast<word>(args.size() + 1) << 16) | op);
+            w.insert(w.end(), args);
+        };
+        emit(17, {1}); emit(14, {0, 1});
+        w.insert(w.end(), {(6u << 16) | 15u, 5u, main, 0x6e69616du, 0u, giid});
+        emit(16, {main, 17u, local_x, 1u, 1u}); emit(71, {giid, 11u, 28u}); emit(71, {array, 6u, 4u});
+        for (word s : {sa, sb, sc}) { emit(72, {s, 0u, 35u, 0u}); emit(71, {s, 2u}); }
+        const auto decorate = [&emit](word var, word slot) { emit(71, {var, 34u, 0u}); emit(71, {var, 33u, slot}); };
+        decorate(a, 0); decorate(b, 1); decorate(c, 2);
+        emit(19, {void_t}); emit(33, {fn, void_t}); emit(21, {uint_t, 32u, 0u}); emit(21, {int_t, 32u, 1u});
+        emit(22, {float_t, 32u}); emit(23, {v3uint, uint_t, 3u}); emit(32, {ptr_in_v3, 1u, v3uint}); emit(59, {ptr_in_v3, giid, 1u});
+        emit(43, {uint_t, uint0, 0u}); emit(32, {ptr_in_uint, 1u, uint_t}); emit(29, {array, float_t});
+        emit(30, {sa, array}); emit(30, {sb, array}); emit(30, {sc, array}); emit(32, {ptra, 12u, sa}); emit(32, {ptrb, 12u, sb}); emit(32, {ptrc, 12u, sc});
+        emit(59, {ptra, a, 12u}); emit(59, {ptrb, b, 12u}); emit(59, {ptrc, c, 12u}); emit(32, {ptrf, 12u, float_t}); emit(43, {int_t, int0, 0u});
+        emit(54, {void_t, main, 0u, fn}); emit(248, {label}); emit(65, {ptr_in_uint, pgiid, giid, uint0}); emit(61, {uint_t, index, pgiid});
+        emit(65, {ptrf, pa, a, int0, index}); emit(61, {float_t, va, pa}); emit(65, {ptrf, pb, b, int0, index}); emit(61, {float_t, vb, pb});
+        emit(operation == spirv_binary_operation::add ? 129u : 133u, {float_t, result, va, vb}); emit(65, {ptrf, pc, c, int0, index}); emit(62, {pc, result}); emit(253, {}); emit(56, {});
+        return {.words = std::move(w), .local_x = local_x};
+    }
+
     // =========================================================================
     // spirv_ir_provider — routes SPIR-V modules through the generic lithe::ir
     // provider CPOs.  ADL finds these tag_invoke overloads on spirv_ir_provider.

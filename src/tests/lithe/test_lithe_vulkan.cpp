@@ -326,3 +326,38 @@ TEST_CASE ("vulkan: execution_mode::device selection under compile_requirements 
 }
 
 #endif // Vulkan present
+
+TEST_CASE("Lithe SPIR-V binary emitter is deterministic and structurally valid",
+          "[lithe][vulkan][spirv][emitter]")
+{
+    auto first = vk_be::emit_spirv_binary_elementwise(
+        vk_be::spirv_binary_operation::add, 32);
+    const auto second = vk_be::emit_spirv_binary_elementwise(
+        vk_be::spirv_binary_operation::add, 32);
+
+    CHECK(first.words == second.words);
+    CHECK(first.identity_hash() == second.identity_hash());
+    CHECK(first.validate() == irns::ir_resolution_state::resolved);
+    CHECK(first.local_x == 32u);
+
+    bool has_fadd = false;
+    bool has_binding_zero = false;
+    for (const auto word : first.words) {
+        has_fadd = has_fadd || (word & 0xFFFFu) == 129u;
+        has_binding_zero = has_binding_zero || word == 0u;
+    }
+    CHECK(has_fadd);
+    CHECK(has_binding_zero);
+}
+
+TEST_CASE("Lithe SPIR-V binary emitter preserves operation identity",
+          "[lithe][vulkan][spirv][emitter]")
+{
+    auto add = vk_be::emit_spirv_binary_elementwise(vk_be::spirv_binary_operation::add);
+    auto multiply = vk_be::emit_spirv_binary_elementwise(
+        vk_be::spirv_binary_operation::multiply);
+
+    CHECK(add.words != multiply.words);
+    CHECK(add.validate() == irns::ir_resolution_state::resolved);
+    CHECK(multiply.validate() == irns::ir_resolution_state::resolved);
+}
