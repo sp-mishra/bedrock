@@ -33,6 +33,7 @@
 #include "../lithe_ir/format.hpp"     // format_descriptor
 #include "../lithe_ir/integration.hpp" // owned_text_ir / owned_binary_ir (export result payloads)
 #include "../lithe_codegen_hl_passes.hpp"
+#include "../lithe_execution_admission.hpp"
 #include "../lithe_codegen_device.hpp"
 
 namespace lithe::codegen::backends {
@@ -83,6 +84,17 @@ namespace lithe::codegen::backends {
             binding.disposition = vulkan_plan_disposition::spirv_compatible;
         }
         return binding;
+    }
+
+    [[nodiscard]] constexpr hl::execution_backend_admission admit_vulkan_plan(
+        const vulkan_plan_binding& binding, const bool provider_available) noexcept {
+        return {.kind = hl::planned_execution_kind::vulkan,
+                .plan_admitted = binding.compatible(),
+                .provider_available = provider_available,
+                .reason = binding.compatible() ? (provider_available
+                        ? hl::execution_admission_reason::admitted
+                        : hl::execution_admission_reason::provider_unavailable)
+                    : hl::execution_admission_reason::plan_rejected};
     }
 
     // =========================================================================

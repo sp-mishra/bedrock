@@ -749,6 +749,7 @@ namespace lithe::codegen::hl {
         std::uint64_t data_byte_cost_ns = 0;
         std::uint64_t reusable_data_byte_cost_ns = 0;
         std::uint64_t transfer_byte_cost_ns = 0;
+        bool cached_setup_cost_known = false;
     };
 
     enum class execution_cache_state : std::uint8_t {
@@ -786,6 +787,7 @@ namespace lithe::codegen::hl {
 
     struct execution_selection_policy {
         std::optional<planned_execution_kind> force{};
+        bool force_requires_success = false;
         bool allow_jit = true;
         bool allow_simd = true;
         bool allow_accelerators = true;
@@ -797,6 +799,7 @@ namespace lithe::codegen::hl {
         std::uint64_t estimated_cost_ns = 0;
         bool forced = false;
         bool fell_back = false;
+        bool force_unsatisfied = false;
         std::uint32_t evaluated_candidates = 0;
     };
 
@@ -806,6 +809,7 @@ namespace lithe::codegen::hl {
         std::uint64_t estimated_cost_ns = 0;
         std::uint32_t evaluated_candidates = 0;
         bool fell_back = false;
+        bool force_unsatisfied = false;
     };
 
     [[nodiscard]] constexpr bool execution_candidate_legal(
@@ -840,7 +844,7 @@ namespace lithe::codegen::hl {
         const execution_candidate_cost& candidate,
         const execution_cost_input& input) noexcept {
         const auto setup = input.cache == execution_cache_state::warm
-                && candidate.cached_setup_cost_ns != 0
+                && (candidate.cached_setup_cost_known || candidate.cached_setup_cost_ns != 0)
             ? candidate.cached_setup_cost_ns : candidate.setup_cost_ns;
         auto total = saturating_cost_add(setup,
             saturating_cost_product(candidate.work_item_cost_ns, input.work_items));
@@ -886,8 +890,13 @@ namespace lithe::codegen::hl {
                 out.forced = true;
                 out.evaluated_candidates = 1;
             } else {
-                out.selected = out.fallback;
-                out.fell_back = true;
+                if (policy.force_requires_success) {
+                    out.selected = *policy.force;
+                    out.force_unsatisfied = true;
+                } else {
+                    out.selected = out.fallback;
+                    out.fell_back = true;
+                }
             }
         } else {
             std::uint64_t best_cost = std::numeric_limits<std::uint64_t>::max();
@@ -905,7 +914,7 @@ namespace lithe::codegen::hl {
         if constexpr (Observe) {
             if (observer != nullptr) observability::emit<true>(*observer, execution_selection_event{
                 out.selected, workload.work_items, out.estimated_cost_ns,
-                out.evaluated_candidates, out.fell_back});
+                out.evaluated_candidates, out.fell_back, out.force_unsatisfied});
         }
         return out;
     }

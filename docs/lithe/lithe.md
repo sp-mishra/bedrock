@@ -1806,6 +1806,9 @@ not select a provider, retain artifacts, or run as part of normal execution.
 `record_measurement` is a separate opt-in adapter that converts only equivalent
 warm samples into the existing feedback store, making them available to an
 adaptive cost model without making benchmark collection part of compilation.
+`calibrate_candidate_cost` is the complementary pure adapter: it returns an
+explicit warm-cache candidate cost from an equivalent benchmark measurement,
+leaving feedback storage and automatic selection under the caller's control.
 
 `execution_cost_input` keeps selection deterministic while representing the
 actual workload: work items, data bytes, device-transfer bytes, cache state,
@@ -1814,11 +1817,23 @@ streaming from reusable data-byte work, and accelerator transfer. Provider
 availability remains a caller-supplied fact, so portable Lithe does not include or probe Metal,
 Vulkan, or JIT facilities merely to rank candidates.
 
+Optional backend adapters convert SIMD, Metal, and Vulkan plan bindings into
+pure `execution_backend_admission` values. The selector remains backend-free;
+admission updates only the matching candidate. `make_execution_fallback_chain`
+exposes the macOS order Metal, Vulkan, SIMD, JIT, interpreter for a selected
+provider. A caller may set `force_requires_success` when a forced provider must
+report failure rather than use a fallback.
+
 The Highway SIMD backend consumes a proven `vector_plan` through
 `bind_vector_plan`. It accepts only materialized f32 elementwise plans with a
 whole-vector or scalar-epilogue tail, then maps the target-neutral plan to the
 native Highway lane count. Every other plan returns an explicit scalar-fallback
 binding; no physical MIR is silently reinterpreted as vector code.
+
+`lower_vector_plan_for_simd` and `execute_simd_binary` provide the typed f32
+add/multiply execution path for admitted plans. They require equal input/output
+extents and honor the proven tail mode. Rejected plans, extent mismatch, or an
+invalid whole-vector tail invoke a statically-bound scalar fallback.
 
 The native Metal path consumes the same `vector_plan` through
 `bind_vector_plan_for_metal`. It first rejects plans that are not proven,

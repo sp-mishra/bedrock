@@ -4,11 +4,13 @@
 // neither includes nor pays for this utility.
 
 #include "lithe_feedback.hpp"
+#include "lithe_codegen_hl_passes.hpp"
 
 #include <chrono>
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,6 +69,31 @@ namespace lithe::benchmark {
         double memory_mb = 0.0;
         double power_w = 0.0;
     };
+
+    struct candidate_calibration_options {
+        std::uint64_t work_items = 0;
+    };
+
+    // Produces an explicit candidate value from an equivalent measurement. It
+    // deliberately does not consult or mutate feedback storage: callers choose
+    // whether the returned calibration participates in a later selection.
+    [[nodiscard]] inline std::optional<codegen::hl::execution_candidate_cost>
+    calibrate_candidate_cost(
+        const codegen::hl::execution_candidate_cost& baseline,
+        const provider_measurement& measurement,
+        const candidate_calibration_options options) {
+        const auto median_ns = measurement.median_warm_execution_ns();
+        if (!measurement.equivalent || options.work_items == 0 || median_ns == 0)
+            return std::nullopt;
+
+        auto calibrated = baseline;
+        calibrated.setup_cost_ns = measurement.cold_compile_ns;
+        calibrated.cached_setup_cost_ns = 0;
+        calibrated.cached_setup_cost_known = true;
+        calibrated.work_item_cost_ns = median_ns / options.work_items
+            + static_cast<std::uint64_t>(median_ns % options.work_items != 0);
+        return calibrated;
+    }
 
     [[nodiscard]] inline bool record_measurement(
         feedback::feedback_store& store, const provider_measurement& measurement,

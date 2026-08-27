@@ -50,3 +50,32 @@ TEST_CASE(
     REQUIRE(profile->sample_count == 1);
     REQUIRE(profile->best_backend_id == "simd");
 }
+
+TEST_CASE(
+    "calibrate_candidate_cost returns an explicit warm-cache candidate only for equivalent work",
+    "[lithe][benchmark][execution][feedback]"
+) {
+    lithe::benchmark::provider_measurement measurement;
+    measurement.cold_compile_ns = 900;
+    measurement.equivalent = true;
+    measurement.warm_execution_ns = {101, 99, 100};
+    const lithe::codegen::hl::execution_candidate_cost baseline{
+        .kind = lithe::codegen::hl::planned_execution_kind::jit,
+        .available = true,
+        .setup_cost_ns = 1,
+        .work_item_cost_ns = 1,
+    };
+
+    const auto calibrated = lithe::benchmark::calibrate_candidate_cost(
+        baseline, measurement, {.work_items = 10});
+
+    REQUIRE(calibrated.has_value());
+    REQUIRE(calibrated->setup_cost_ns == 900);
+    REQUIRE(calibrated->cached_setup_cost_known);
+    REQUIRE(calibrated->cached_setup_cost_ns == 0);
+    REQUIRE(calibrated->work_item_cost_ns == 10);
+
+    measurement.equivalent = false;
+    REQUIRE_FALSE(lithe::benchmark::calibrate_candidate_cost(
+        baseline, measurement, {.work_items = 10}).has_value());
+}

@@ -6,6 +6,7 @@
 
 #include "../lithe_codegen_pipeline.hpp"
 #include "../lithe_codegen_hl_passes.hpp"
+#include "../lithe_execution_admission.hpp"
 #include "../lithe_codegen_device.hpp"
 #include "../lithe_execution/backend_persist.hpp"
 #include "pravaha/backends/metal_gpu.hpp"
@@ -837,6 +838,17 @@ namespace lithe::codegen::backends {
             binding.disposition = metal_plan_disposition::accepted;
         }
         return binding;
+    }
+
+    [[nodiscard]] inline hl::execution_backend_admission admit_metal_plan(
+        const metal_plan_binding& binding) noexcept {
+        const bool provider_available = metal_backend::available();
+        return {.kind = hl::planned_execution_kind::metal,
+                .plan_admitted = binding.accepted(),
+                .provider_available = provider_available,
+                .reason = binding.accepted() ? hl::execution_admission_reason::admitted
+                    : (provider_available ? hl::execution_admission_reason::plan_rejected
+                                          : hl::execution_admission_reason::provider_unavailable)};
     }
 
     static_assert(CodeEmissionTarget<metal_backend>);

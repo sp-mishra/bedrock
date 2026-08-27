@@ -23,11 +23,14 @@
 
 #include "lithe_codegen_interpreter.hpp"
 #include "../lithe_codegen_hl_passes.hpp"
+#include "../lithe_execution_admission.hpp"
 
 #include "hwy/highway.h"
 
 #include <cstddef>
+#include <concepts>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 
@@ -157,6 +160,61 @@ namespace lithe::codegen::backends {
             out.disposition = simd_plan_disposition::accepted;
         }
         return out;
+    }
+
+    [[nodiscard]] constexpr hl::execution_backend_admission admit_simd_plan(
+        const simd_plan_binding& binding) noexcept {
+        const bool provider_available = binding.native_lanes != 0;
+        return {.kind = hl::planned_execution_kind::simd,
+                .plan_admitted = binding.accepted(),
+                .provider_available = provider_available,
+                .reason = binding.accepted() ? hl::execution_admission_reason::admitted
+                    : (provider_available ? hl::execution_admission_reason::plan_rejected
+                                          : hl::execution_admission_reason::provider_unavailable)};
+    }
+
+    enum class simd_binary_operation : std::uint8_t { add, multiply };
+
+    enum class simd_execution_path : std::uint8_t {
+        vectorized,
+        scalar_fallback,
+    };
+
+    struct simd_binary_lowering {
+        simd_plan_binding binding{};
+        simd_binary_operation operation = simd_binary_operation::add;
+
+        [[nodiscard]] constexpr bool accepted() const noexcept { return binding.accepted(); }
+    };
+
+    [[nodiscard]] inline simd_binary_lowering lower_vector_plan_for_simd(
+        const hl::vector_plan& plan, const simd_binary_operation operation) noexcept {
+        return {.binding = bind_vector_plan(plan), .operation = operation};
+    }
+
+    template <class ScalarFallback>
+        requires std::invocable<ScalarFallback&, std::span<const float>, std::span<const float>, std::span<float>>
+    [[nodiscard]] inline simd_execution_path execute_simd_binary(
+        const simd_binary_lowering& lowering,
+        const std::span<const float> lhs,
+        const std::span<const float> rhs,
+        const std::span<float> output,
+        ScalarFallback&& scalar_fallback) noexcept(noexcept(std::invoke(
+            scalar_fallback, lhs, rhs, output))) {
+        const bool matching_extents = lhs.size() == rhs.size() && lhs.size() == output.size();
+        const bool whole_vectors = lowering.binding.native_lanes != 0
+            && lhs.size() % lowering.binding.native_lanes == 0;
+        const bool valid_tail = lowering.binding.tail == hl::vector_tail_strategy::scalar_epilogue
+            || (lowering.binding.tail == hl::vector_tail_strategy::none && whole_vectors);
+        if (!lowering.accepted() || !matching_extents || !valid_tail) {
+            std::invoke(std::forward<ScalarFallback>(scalar_fallback), lhs, rhs, output);
+            return simd_execution_path::scalar_fallback;
+        }
+        switch (lowering.operation) {
+        case simd_binary_operation::add: simd_kernels::add(lhs, rhs, output); break;
+        case simd_binary_operation::multiply: simd_kernels::mul(lhs, rhs, output); break;
+        }
+        return simd_execution_path::vectorized;
     }
 
     // ============================================================================
