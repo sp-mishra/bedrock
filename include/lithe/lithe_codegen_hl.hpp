@@ -550,6 +550,22 @@ namespace lithe::codegen::hl {
         std::uint32_t memory_writes = 0;
     };
 
+    enum class alias_classification : std::uint8_t {
+        no_memory,
+        distinct_bases,
+        possible_alias,
+        unknown,
+    };
+
+    struct region_effect_summary {
+        hl_effect_flags effects = hl_effect_flags::none;
+        alias_classification aliasing = alias_classification::no_memory;
+        std::uint32_t reads = 0;
+        std::uint32_t writes = 0;
+        bool has_control_flow = false;
+        bool may_trap = false;
+    };
+
     namespace detail {
         inline void summarize_loop_region(const hl_region& region,
                                           loop_legality_summary& summary,
@@ -674,6 +690,57 @@ namespace lithe::codegen::hl {
                                               element_bits, has_element_type);
             }
         }
+        return summary;
+    }
+
+    [[nodiscard]] inline region_effect_summary summarize_region_effects(
+        const hl_region& region) noexcept {
+        region_effect_summary summary;
+        std::array<ssa_value_id, 16> read_bases{};
+        std::array<ssa_value_id, 16> write_bases{};
+        std::size_t read_count = 0;
+        std::size_t write_count = 0;
+        const auto visit = [&](const auto& self, const hl_region& current) -> void {
+            for (auto* block = current.blocks.head; block != nullptr; block = block->list_node.next) {
+                for (auto* op = block->ops.head; op != nullptr; op = op->list_node.next) {
+                    const auto effects = effects_of(op->op);
+                    summary.effects = summary.effects | effects;
+                    summary.has_control_flow |= has_effect(effects, hl_effect_flags::terminal);
+                    summary.may_trap |= has_effect(effects, hl_effect_flags::may_trap);
+                    const bool load = op->op == hl_opcode::memref_load;
+                    const bool store = op->op == hl_opcode::memref_store;
+                    if ((load || store) && std::holds_alternative<memref_attr>(op->attr)) {
+                        const auto& attr = std::get<memref_attr>(op->attr);
+                        if (attr.base_operand_index >= 0
+                            && static_cast<std::size_t>(attr.base_operand_index) < op->operands.size()) {
+                            const auto base = op->operands[static_cast<std::size_t>(attr.base_operand_index)];
+                            const auto contains = [base](const auto& values, const std::size_t count) {
+                                return std::ranges::find(std::span{values.data(), count}, base)
+                                    != std::span{values.data(), count}.end();
+                            };
+                            if (load) {
+                                ++summary.reads;
+                                if (contains(write_bases, write_count))
+                                    summary.aliasing = alias_classification::possible_alias;
+                                if (read_count < read_bases.size()) read_bases[read_count++] = base;
+                            }
+                            else {
+                                ++summary.writes;
+                                if (contains(read_bases, read_count))
+                                    summary.aliasing = alias_classification::possible_alias;
+                                if (write_count < write_bases.size()) write_bases[write_count++] = base;
+                            }
+                        }
+                        else summary.aliasing = alias_classification::unknown;
+                    }
+                    for (const auto* nested : op->regions)
+                        if (nested != nullptr) self(self, *nested);
+                }
+            }
+        };
+        visit(visit, region);
+        if (summary.reads + summary.writes != 0 && summary.aliasing == alias_classification::no_memory)
+            summary.aliasing = alias_classification::distinct_bases;
         return summary;
     }
 

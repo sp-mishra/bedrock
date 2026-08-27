@@ -611,6 +611,17 @@ namespace lithe::codegen::hl {
             // A region_yield copies its operands into these loop-carried registers
             // before branching to the loop latch.
             std::vector<preg> active_yield_targets;
+            struct lowering_loop_context {
+                std::uint32_t preheader = 0;
+                std::uint32_t header = 0;
+                std::uint32_t latch = 0;
+                std::uint32_t exit = 0;
+                preg induction{};
+                std::int64_t lower = 0;
+                std::int64_t upper = 0;
+                std::int64_t step = 1;
+            };
+            std::vector<lowering_loop_context> active_loops;
 
             auto fresh_preg = [&]() -> preg {
                 const auto id = static_cast<std::uint16_t>(next_preg_id++);
@@ -805,8 +816,22 @@ namespace lithe::codegen::hl {
                                 active_yield_targets = carried;
                             }
                             // Lower body recursively; its exit falls to latch.
+                            // Keep a local context so affine memory operations can
+                            // retain optional physical-MIR descriptors.
+                            active_loops.push_back({
+                                .preheader = flat_blk.id,
+                                .header = header_id,
+                                .latch = latch_id,
+                                .exit = exit_id,
+                                .induction = iv,
+                                .lower = b.lower,
+                                .upper = b.upper,
+                                .step = b.step,
+                            });
                             std::uint32_t body_first_id =
                                 self(self, *op->regions[0], latch_id);
+                            const auto loop_context = active_loops.back();
+                            active_loops.pop_back();
                             active_yield_targets.clear();
 
                             // Empty body region lowers to zero blocks: cycle the loop
@@ -822,6 +847,17 @@ namespace lithe::codegen::hl {
                             emit_add(latch_blk, iv, iv, b.step);
                             emit_branch(latch_blk, header_id);
                             flat.function.blocks.push_back(std::move(latch_blk));
+
+                            flat.canonical_loops.push_back({
+                                .preheader_block = loop_context.preheader,
+                                .header_block = loop_context.header,
+                                .latch_block = loop_context.latch,
+                                .exit_block = loop_context.exit,
+                                .induction = loop_context.induction,
+                                .lower = loop_context.lower,
+                                .upper = loop_context.upper,
+                                .step = loop_context.step,
+                            });
 
                             // Exit block becomes the continuation.
                             flat_blk = std::move(exit_blk);
@@ -941,6 +977,19 @@ namespace lithe::codegen::hl {
                                             allocated_operand::as_preg(tmp)
                                         };
                                         flat_blk.instructions.push_back(std::move(ai));
+                                    }
+                                    if (mrt.rank == 1 && !active_loops.empty()
+                                        && idx_preg.id == active_loops.back().induction.id) {
+                                        flat.affine_addresses.push_back({
+                                            .loop_header_block = active_loops.back().header,
+                                            .multiply_instruction = next_instr_id - 2,
+                                            .address_instruction = next_instr_id - 1,
+                                            .induction = idx_preg,
+                                            .base = addr,
+                                            .scaled_index = tmp,
+                                            .address = new_addr,
+                                            .stride_bytes = stride_bytes,
+                                        });
                                     }
                                     addr = new_addr;
                                 }

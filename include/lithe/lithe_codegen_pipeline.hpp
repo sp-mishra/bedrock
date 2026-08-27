@@ -249,6 +249,53 @@ namespace lithe::codegen {
         }
     };
 
+    struct scalar_evolution_fact {
+        preg value{};
+        std::int64_t initial = 0;
+        std::int64_t step = 0;
+        std::uint64_t trip_count = 0;
+        bool affine = false;
+        bool exact_trip_count = false;
+    };
+
+    struct scalar_evolution_result {
+        std::vector<scalar_evolution_fact> recurrences;
+        std::vector<std::string> diagnostics;
+
+        [[nodiscard]] bool ok() const noexcept { return diagnostics.empty(); }
+    };
+
+    [[nodiscard]] inline scalar_evolution_result analyze_scalar_evolution(
+        const mir::physical_mir_function& function) {
+        scalar_evolution_result out;
+        for (const auto& loop : function.canonical_loops) {
+            scalar_evolution_fact fact{
+                .value = loop.induction,
+                .initial = loop.lower,
+                .step = loop.step,
+                .affine = loop.step != 0,
+            };
+            if (!fact.affine) {
+                out.diagnostics.push_back("scalar_evolution: zero-step loop descriptor");
+                continue;
+            }
+            if (loop.step > 0 && loop.upper >= loop.lower) {
+                const auto extent = static_cast<std::uint64_t>(loop.upper - loop.lower);
+                const auto step = static_cast<std::uint64_t>(loop.step);
+                fact.trip_count = (extent + step - 1) / step;
+                fact.exact_trip_count = true;
+            }
+            else if (loop.step < 0 && loop.upper <= loop.lower) {
+                const auto extent = static_cast<std::uint64_t>(loop.lower - loop.upper);
+                const auto step = static_cast<std::uint64_t>(-loop.step);
+                fact.trip_count = (extent + step - 1) / step;
+                fact.exact_trip_count = true;
+            }
+            out.recurrences.push_back(fact);
+        }
+        return out;
+    }
+
     struct dominator_analysis_result {
         mir::physical_mir_function function;
 
@@ -2156,6 +2203,113 @@ namespace lithe::codegen {
                 out.changed = false;
                 ctx.changed = false;
             }
+            return out;
+        }
+    };
+
+    // Replaces `base + (iv * stride)` with a pointer induction variable for the
+    // exact canonical form recorded by structured lowering. The initial version
+    // deliberately accepts only zero-based, unit-step loops and loop-invariant
+    // bases; all other forms retain their original arithmetic.
+    struct affine_induction_strength_reduction_pass {
+        [[nodiscard]] mir_pass_result run(
+            mir::physical_mir_function const& fn, mir_pass_context& ctx) const {
+            mir_pass_result out;
+            out.function = fn;
+            const auto loops = analyze_loops(fn);
+            if (!loops.ok()) return out;
+
+            std::uint16_t next_preg = 0;
+            for (const auto& block : out.function.function.blocks)
+                for (const auto& inst : block.instructions)
+                    for (const auto& def : inst.defs)
+                        if (def.type == allocated_operand::kind::preg)
+                            next_preg = std::max(next_preg, std::get<preg>(def.value).id);
+            ++next_preg;
+
+            const auto block_for = [&](const std::uint32_t id) -> allocated_basic_block* {
+                const auto it = std::ranges::find(out.function.function.blocks, id, &allocated_basic_block::id);
+                return it == out.function.function.blocks.end() ? nullptr : std::addressof(*it);
+            };
+            const auto instruction_for = [&](const std::uint32_t id) -> allocated_instruction* {
+                for (auto& block : out.function.function.blocks) {
+                    const auto it = std::ranges::find(block.instructions, id, &allocated_instruction::id);
+                    if (it != block.instructions.end()) return std::addressof(*it);
+                }
+                return nullptr;
+            };
+
+            bool changed = false;
+            const auto checked_positive_product = [](const std::int64_t lhs, const std::int64_t rhs,
+                                                     std::int64_t& result) noexcept {
+                if (lhs < 0 || rhs < 0 || (lhs != 0 && rhs > std::numeric_limits<std::int64_t>::max() / lhs))
+                    return false;
+                result = lhs * rhs;
+                return true;
+            };
+            for (auto& address : out.function.affine_addresses) {
+                if (address.strength_reduced) continue;
+                const auto loop_it = std::ranges::find(out.function.canonical_loops, address.loop_header_block,
+                    &mir::canonical_loop_descriptor::header_block);
+                const auto analysis_it = std::ranges::find(loops.loops, address.loop_header_block,
+                    &loop_info::header);
+                if (loop_it == out.function.canonical_loops.end() || analysis_it == loops.loops.end()
+                    || loop_it->lower < 0 || loop_it->step <= 0 || address.stride_bytes <= 0) continue;
+                std::int64_t start_offset = 0;
+                std::int64_t increment = 0;
+                if (!checked_positive_product(loop_it->lower, address.stride_bytes, start_offset)
+                    || !checked_positive_product(loop_it->step, address.stride_bytes, increment)) continue;
+
+                bool base_defined_in_loop = false;
+                for (const auto& block : out.function.function.blocks) {
+                    if (!analysis_it->body.contains(block.id)) continue;
+                    for (const auto& inst : block.instructions)
+                        for (const auto& def : inst.defs)
+                            base_defined_in_loop |= def.type == allocated_operand::kind::preg
+                                && std::get<preg>(def.value).id == address.base.id;
+                }
+                if (base_defined_in_loop || next_preg == std::numeric_limits<std::uint16_t>::max()) continue;
+                auto* preheader = block_for(loop_it->preheader_block);
+                auto* latch = block_for(loop_it->latch_block);
+                auto* multiply = instruction_for(address.multiply_instruction);
+                auto* add = instruction_for(address.address_instruction);
+                if (!preheader || !latch || !multiply || !add || multiply->op != opcode::mul
+                    || add->op != opcode::add) continue;
+
+                const preg pointer{next_preg++, "ptr.iv" + std::to_string(address.loop_header_block)};
+                allocated_instruction init{.id = 0, .op = opcode::add,
+                    .defs = {allocated_operand::as_preg(pointer)},
+                    .uses = {allocated_operand::as_preg(address.base), allocated_operand::as_i64(start_offset)}};
+                for (const auto& block : out.function.function.blocks)
+                    for (const auto& inst : block.instructions) init.id = std::max(init.id, inst.id);
+                ++init.id;
+                auto pos = std::ranges::find_if(preheader->instructions, [](const allocated_instruction& i) {
+                    return i.op == opcode::branch || i.op == opcode::branch_cond || i.op == opcode::ret;
+                });
+                preheader->instructions.insert(pos, init);
+                allocated_instruction advance{.id = ++init.id, .op = opcode::add,
+                    .defs = {allocated_operand::as_preg(pointer)},
+                    .uses = {allocated_operand::as_preg(pointer), allocated_operand::as_i64(increment)}};
+                pos = std::ranges::find_if(latch->instructions, [](const allocated_instruction& i) {
+                    return i.op == opcode::branch || i.op == opcode::branch_cond || i.op == opcode::ret;
+                });
+                latch->instructions.insert(pos, advance);
+                add->op = opcode::mov;
+                add->uses = {allocated_operand::as_preg(pointer)};
+                for (auto& block : out.function.function.blocks) {
+                    const auto it = std::ranges::find(block.instructions, address.multiply_instruction,
+                        &allocated_instruction::id);
+                    if (it != block.instructions.end()) { block.instructions.erase(it); break; }
+                }
+                address.strength_reduced = true;
+                address.pointer_induction = pointer;
+                changed = true;
+            }
+            if (!changed) return out;
+            const auto verification = verify_physical_mir(out.function);
+            if (!verification.ok()) { out.function = fn; return out; }
+            out.changed = true;
+            ctx.changed = true;
             return out;
         }
     };
@@ -5303,6 +5457,8 @@ namespace lithe::codegen {
             preset.pipeline.add_pass("unreachable_block_elimination_pass", unreachable_block_elimination_pass{});
             preset.pipeline.add_pass("trivial_jump_threading_pass", trivial_jump_threading_pass{});
             preset.pipeline.add_pass("loop_invariant_code_motion_pass", loop_invariant_code_motion_pass{});
+            preset.pipeline.add_pass("affine_induction_strength_reduction_pass",
+                                     affine_induction_strength_reduction_pass{});
             preset.pipeline.add_pass("constant_propagation_pass", constant_propagation_pass{});
             preset.pipeline.add_pass("copy_propagation_pass", copy_propagation_pass{});
             preset.pipeline.add_pass("common_subexpression_elimination_pass",
@@ -6988,6 +7144,35 @@ namespace lithe::codegen {
                         }
                     }
                 }
+            }
+        }
+
+        const auto has_block = [&](const std::uint32_t id) {
+            return std::ranges::find(fn.function.blocks, id, &allocated_basic_block::id)
+                != fn.function.blocks.end();
+        };
+        const auto has_instruction = [&](const std::uint32_t id) {
+            return std::ranges::any_of(fn.function.blocks, [&](const allocated_basic_block& block) {
+                return std::ranges::find(block.instructions, id, &allocated_instruction::id)
+                    != block.instructions.end();
+            });
+        };
+        for (const auto& loop : fn.canonical_loops) {
+            if (!has_block(loop.preheader_block) || !has_block(loop.header_block)
+                || !has_block(loop.latch_block) || !has_block(loop.exit_block)
+                || loop.induction.name.empty() || loop.step == 0) {
+                out.diagnostics.push_back("physical MIR has an invalid canonical loop descriptor");
+            }
+        }
+        for (const auto& address : fn.affine_addresses) {
+            const bool known_loop = std::ranges::find(fn.canonical_loops, address.loop_header_block,
+                &mir::canonical_loop_descriptor::header_block) != fn.canonical_loops.end();
+            const bool valid_shape = address.strength_reduced
+                ? !address.pointer_induction.name.empty()
+                : has_instruction(address.multiply_instruction)
+                    && has_instruction(address.address_instruction) && address.stride_bytes != 0;
+            if (!known_loop || !valid_shape) {
+                out.diagnostics.push_back("physical MIR has an invalid affine address descriptor");
             }
         }
 

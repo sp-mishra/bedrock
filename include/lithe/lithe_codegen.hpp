@@ -1703,6 +1703,32 @@ namespace lithe::codegen {
             [[nodiscard]] bool empty() const noexcept { return entries.empty(); }
         };
 
+        // Optional structured-lowering facts. These are local compiler metadata,
+        // never an instruction encoding or backend requirement.
+        struct canonical_loop_descriptor {
+            std::uint32_t preheader_block = 0;
+            std::uint32_t header_block = 0;
+            std::uint32_t latch_block = 0;
+            std::uint32_t exit_block = 0;
+            preg induction{};
+            std::int64_t lower = 0;
+            std::int64_t upper = 0;
+            std::int64_t step = 1;
+        };
+
+        struct affine_address_descriptor {
+            std::uint32_t loop_header_block = 0;
+            std::uint32_t multiply_instruction = 0;
+            std::uint32_t address_instruction = 0;
+            preg induction{};
+            preg base{};
+            preg scaled_index{};
+            preg address{};
+            std::int64_t stride_bytes = 0;
+            bool strength_reduced = false;
+            preg pointer_induction{};
+        };
+
         struct physical_mir_function {
             allocated_function_ir function;
             std::size_t inserted_loads = 0;
@@ -1720,6 +1746,8 @@ namespace lithe::codegen {
             std::optional<prologue_plan> prologue;
             std::optional<epilogue_plan> epilogue;
             std::optional<stack_map_artifact> stack_map; // populated by safepoint_injection_pass
+            std::vector<canonical_loop_descriptor> canonical_loops;
+            std::vector<affine_address_descriptor> affine_addresses;
             // Optional execution budget derived by structured lowering for a
             // verified counted loop. Raw physical MIR retains the interpreter's
             // conservative fallback guard.

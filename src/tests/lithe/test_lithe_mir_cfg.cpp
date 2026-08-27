@@ -154,6 +154,91 @@ TEST_CASE (
 }
 
 TEST_CASE (
+"affine_induction_strength_reduction_pass: rewrites a canonical zero-based affine loop",
+"[lithe][mir][strength-reduction]"
+) {
+    allocated_instruction condition;
+    condition.id = 2;
+    condition.op = opcode::branch_cond;
+    condition.uses = {allocated_operand::as_preg(preg{9, "cond"}),
+                      allocated_operand::as_block(3), allocated_operand::as_block(5)};
+
+    allocated_instruction multiply;
+    multiply.id = 3;
+    multiply.op = opcode::mul;
+    multiply.defs = {allocated_operand::as_preg(preg{4, "scaled"})};
+    multiply.uses = {allocated_operand::as_preg(preg{1, "iv"}), allocated_operand::as_i64(4)};
+
+    allocated_instruction address;
+    address.id = 4;
+    address.op = opcode::add;
+    address.defs = {allocated_operand::as_preg(preg{5, "address"})};
+    address.uses = {allocated_operand::as_preg(preg{2, "base"}),
+                    allocated_operand::as_preg(preg{4, "scaled"})};
+
+    allocated_instruction advance;
+    advance.id = 5;
+    advance.op = opcode::add;
+    advance.defs = {allocated_operand::as_preg(preg{1, "iv"})};
+    advance.uses = {allocated_operand::as_preg(preg{1, "iv"}), allocated_operand::as_i64(1)};
+
+    auto fn = make_physical({
+        make_block(1, {make_branch(1, 2)}, {2}),
+        make_block(2, {condition}, {3, 5}),
+        make_block(3, {multiply, address, make_branch(6, 4)}, {4}),
+        make_block(4, {advance, make_branch(7, 2)}, {2}),
+        make_block(5, {make_ret(8)})
+    }, 1);
+    fn.canonical_loops.push_back({1, 2, 4, 5, preg{1, "iv"}, 0, 64, 1});
+    fn.affine_addresses.push_back({2, 3, 4, preg{1, "iv"}, preg{2, "base"},
+                                   preg{4, "scaled"}, preg{5, "address"}, 4});
+
+    mir_pass_context context;
+    const auto result = affine_induction_strength_reduction_pass{}.run(fn, context);
+    REQUIRE(result.changed);
+    REQUIRE(result.function.affine_addresses[0].strength_reduced);
+
+    const auto& body = *std::ranges::find(result.function.function.blocks, 3u,
+                                           &allocated_basic_block::id);
+    REQUIRE(std::ranges::none_of(body.instructions, [](const allocated_instruction& inst) {
+        return inst.id == 3;
+    }));
+    const auto address_it = std::ranges::find(body.instructions, 4u, &allocated_instruction::id);
+    REQUIRE(address_it != body.instructions.end());
+    REQUIRE(address_it->op == opcode::mov);
+}
+
+TEST_CASE (
+"affine_induction_strength_reduction_pass: preserves a non-zero-based loop",
+"[lithe][mir][strength-reduction]"
+) {
+    auto fn = make_physical({
+        make_block(1, {make_branch(1, 2)}, {2}),
+        make_block(2, {make_branch(2, 3)}, {3}),
+        make_block(3, {make_ret(3)})
+    }, 1);
+    fn.canonical_loops.push_back({1, 2, 2, 3, preg{1, "iv"}, 1, 8, 1});
+    fn.affine_addresses.push_back({2, 0, 0, preg{1, "iv"}, preg{2, "base"},
+                                   preg{3, "scaled"}, preg{4, "address"}, 4});
+
+    mir_pass_context context;
+    const auto result = affine_induction_strength_reduction_pass{}.run(fn, context);
+    REQUIRE_FALSE(result.changed);
+    REQUIRE_FALSE(result.function.affine_addresses[0].strength_reduced);
+}
+
+TEST_CASE (
+"verify_physical_mir: rejects invalid optional loop descriptors",
+"[lithe][mir][descriptor]"
+) {
+    auto fn = make_physical({make_block(1, {make_ret(1)})}, 1);
+    fn.canonical_loops.push_back({1, 2, 3, 4, preg{1, "iv"}, 0, 8, 1});
+    const auto verification = verify_physical_mir(fn);
+    REQUIRE_FALSE(verification.ok());
+    REQUIRE(has_diag(verification, "invalid canonical loop descriptor"));
+}
+
+TEST_CASE (
 
 "MIR CFG topological order remains usable with cycles"
 ,

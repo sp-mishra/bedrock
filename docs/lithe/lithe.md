@@ -1768,6 +1768,11 @@ unique `load_imm` materializations. It intentionally does not create preheaders
 or move arithmetic/memory operations; those need complete effect and induction
 proofs before they can change execution placement.
 
+Structured lowering also records optional canonical-loop and affine-address
+descriptors. O2 uses them for pointer-induction strength reduction only for a
+zero-based, unit-step loop with an invariant base and an exact
+`base + (iv * stride)` address form; every other loop keeps its original MIR.
+
 **Pass composition helper:**
 
 ```cpp
