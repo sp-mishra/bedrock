@@ -1756,6 +1756,18 @@ All passes are structs with `run()` — no `std::function`, no virtuals.
 | `coordinate_lowering_pass`   | HL → flat: expand loops + memref address arithmetic; sub-byte (`elem_bits < 8`) elements use bit-offset arithmetic + read-modify-write masking; MLIR-style `block_args` lowered to fresh physical registers via `ssa_to_preg` |
 | `task_plan_extraction_pass`  | Extract `task_decomposition_plan` from `is_parallel` ops                                                                                                                                                                      |
 
+At physical MIR `mir_opt_level::O2` runs the verified scalar cleanup sequence:
+unreachable-block elimination, jump threading, conservative loop-invariant
+motion, constant propagation, copy propagation, common-subexpression
+elimination, dead-definition elimination, and peephole cleanup. The default remains `O0`; users opt in through
+`codegen_options::with_mir_opt_level(mir_opt_level::O2)` or supply their own
+pipeline.
+
+The O2 loop-invariant pass uses only an existing single preheader and hoists
+unique `load_imm` materializations. It intentionally does not create preheaders
+or move arithmetic/memory operations; those need complete effect and induction
+proofs before they can change execution placement.
+
 **Pass composition helper:**
 
 ```cpp

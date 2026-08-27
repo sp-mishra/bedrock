@@ -2045,6 +2045,122 @@ namespace lithe::codegen {
     };
 
     // -----------------------------------------------------------------------
+    // Loop-invariant code motion
+    //
+    // Physical MIR does not create preheaders on its own.  This pass therefore
+    // only uses an already unambiguous, single external predecessor and hoists
+    // load_imm instructions: they have no operands, memory effects, traps, or
+    // target-dependent floating-point state.  Broader arithmetic and memory
+    // motion remains the responsibility of a future effect-aware LICM pass.
+    // -----------------------------------------------------------------------
+
+    struct loop_invariant_code_motion_pass {
+        [[nodiscard]] mir_pass_result run(
+            mir::physical_mir_function const& fn, mir_pass_context& ctx) const {
+            mir_pass_result out;
+            out.function = fn;
+
+            const auto loops = analyze_loops(fn);
+            if (!loops.ok() || loops.loops.empty()) return out;
+            const auto cfg = analyze_cfg(fn);
+            if (!cfg.ok()) return out;
+
+            std::unordered_map<std::uint16_t, std::size_t> preg_def_count;
+            for (const auto& block : out.function.function.blocks) {
+                for (const auto& inst : block.instructions) {
+                    for (const auto& def : inst.defs) {
+                        if (def.type == allocated_operand::kind::preg)
+                            ++preg_def_count[std::get<preg>(def.value).id];
+                    }
+                }
+            }
+
+            // Process inner loops first. A candidate can then be hoisted only
+            // once, never by both an inner and enclosing loop.
+            auto ordered_loops = loops.loops;
+            std::ranges::sort(ordered_loops, {}, [](const loop_info& loop) {
+                return loop.body.size();
+            });
+
+            std::size_t hoisted = 0;
+            for (const auto& loop : ordered_loops) {
+                auto header_it = std::ranges::find_if(out.function.function.blocks,
+                    [&](const allocated_basic_block& block) { return block.id == loop.header; });
+                if (header_it == out.function.function.blocks.end()) continue;
+
+                std::vector<std::uint32_t> external_predecessors;
+                for (const auto& [block_id, info] : cfg.block_info) {
+                    if (loop.body.contains(block_id)) continue;
+                    if (std::ranges::find(info.successors, loop.header) != info.successors.end()) {
+                        external_predecessors.push_back(block_id);
+                    }
+                }
+                if (external_predecessors.size() != 1) continue;
+
+                auto preheader_it = std::ranges::find_if(out.function.function.blocks,
+                    [&](const allocated_basic_block& block) {
+                        return block.id == external_predecessors.front();
+                    });
+                if (preheader_it == out.function.function.blocks.end()) continue;
+
+                std::vector<allocated_instruction> moved;
+                for (auto& block : out.function.function.blocks) {
+                    if (!loop.body.contains(block.id) || block.id == loop.header) continue;
+
+                    std::vector<allocated_instruction> retained;
+                    retained.reserve(block.instructions.size());
+                    for (auto& inst : block.instructions) {
+                        const bool is_unique_load_imm = inst.op == opcode::load_imm
+                            && inst.defs.size() == 1
+                            && inst.defs.front().type == allocated_operand::kind::preg
+                            && inst.uses.size() == 1
+                            && inst.uses.front().type == allocated_operand::kind::immediate_i64
+                            && preg_def_count[std::get<preg>(inst.defs.front().value).id] == 1;
+                        if (is_unique_load_imm) {
+                            moved.push_back(std::move(inst));
+                        }
+                        else {
+                            retained.push_back(std::move(inst));
+                        }
+                    }
+                    block.instructions = std::move(retained);
+                }
+
+                if (moved.empty()) continue;
+
+                const auto terminator = std::ranges::find_if(preheader_it->instructions,
+                    [](const allocated_instruction& inst) {
+                        return inst.op == opcode::branch || inst.op == opcode::branch_cond
+                            || inst.op == opcode::ret;
+                    });
+                preheader_it->instructions.insert(terminator,
+                                                   std::make_move_iterator(moved.begin()),
+                                                   std::make_move_iterator(moved.end()));
+                hoisted += moved.size();
+            }
+
+            if (hoisted == 0) return out;
+
+            out.changed = true;
+            ctx.changed = true;
+
+            const auto verification = verify_physical_mir(out.function);
+            out.function.verified = verification.ok();
+            out.function.verification_diagnostics = verification.diagnostics;
+            if (!verification.ok()) {
+                out.diagnostics.push_back(
+                    "loop_invariant_code_motion: verification failed after hoisting; returning original physical MIR");
+                out.diagnostics.insert(out.diagnostics.end(), verification.diagnostics.begin(),
+                                       verification.diagnostics.end());
+                out.function = fn;
+                out.changed = false;
+                ctx.changed = false;
+            }
+            return out;
+        }
+    };
+
+    // -----------------------------------------------------------------------
     // Common Subexpression Elimination pass
     //
     // Replaces a pure expression with a mov from the register that holds the
@@ -5182,9 +5298,16 @@ namespace lithe::codegen {
             preset.pipeline.add_pass("peephole_mir_pass", make_peephole_mir_pass(options));
             break;
         case mir_opt_level::O2:
-            preset.name = "conservative";
+            preset.name = "scalar-optimizer";
             preset.kind = mir_pipeline_preset_kind::conservative;
             preset.pipeline.add_pass("unreachable_block_elimination_pass", unreachable_block_elimination_pass{});
+            preset.pipeline.add_pass("trivial_jump_threading_pass", trivial_jump_threading_pass{});
+            preset.pipeline.add_pass("loop_invariant_code_motion_pass", loop_invariant_code_motion_pass{});
+            preset.pipeline.add_pass("constant_propagation_pass", constant_propagation_pass{});
+            preset.pipeline.add_pass("copy_propagation_pass", copy_propagation_pass{});
+            preset.pipeline.add_pass("common_subexpression_elimination_pass",
+                                     common_subexpression_elimination_pass{});
+            preset.pipeline.add_pass("dead_def_elimination_pass", dead_def_elimination_pass{});
             preset.pipeline.add_pass("peephole_mir_pass", make_peephole_mir_pass(options));
             break;
         case mir_opt_level::Debug:
