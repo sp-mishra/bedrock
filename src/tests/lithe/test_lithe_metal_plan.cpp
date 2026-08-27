@@ -39,4 +39,22 @@ namespace {
         CHECK_FALSE(binding.accepted());
         CHECK(binding.disposition == backends::metal_plan_disposition::scalar_fallback);
     }
+
+    TEST_CASE("Metal planned lowering rejects an incompatible device plan",
+              "[lithe][metal][plan]") {
+        hl::vector_plan vector_plan{
+            .lanes = 8,
+            .element_bits = 32,
+            .tail = hl::vector_tail_strategy::none,
+            .reduction = hl::vector_reduction_shape::none,
+            .legality = hl::vector_plan_legality::proven,
+            .schedule_materialized = true,
+        };
+        device::kernel_plan unsupported;
+
+        const auto lowering = backends::lower_vector_plan_for_metal(vector_plan, unsupported);
+
+        CHECK_FALSE(lowering.accepted());
+        CHECK_FALSE(backends::emit_metal_plan(lowering).has_value());
+    }
 } // namespace

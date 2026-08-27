@@ -840,6 +840,27 @@ namespace lithe::codegen::backends {
         return binding;
     }
 
+    struct metal_plan_lowering {
+        metal_plan_binding binding{};
+        const device::kernel_plan* kernel = nullptr;
+
+        [[nodiscard]] bool accepted() const noexcept {
+            return binding.accepted() && kernel != nullptr && metal_backend::supports(*kernel);
+        }
+    };
+
+    [[nodiscard]] inline metal_plan_lowering lower_vector_plan_for_metal(
+        const hl::vector_plan& vector_plan,
+        const device::kernel_plan& kernel_plan) noexcept {
+        return {.binding = bind_vector_plan_for_metal(vector_plan), .kernel = std::addressof(kernel_plan)};
+    }
+
+    [[nodiscard]] inline std::optional<compilation_artifact> emit_metal_plan(
+        const metal_plan_lowering& lowering) {
+        if (!lowering.accepted()) return std::nullopt;
+        return metal_backend{}.emit(*lowering.kernel);
+    }
+
     [[nodiscard]] inline hl::execution_backend_admission admit_metal_plan(
         const metal_plan_binding& binding) noexcept {
         const bool provider_available = metal_backend::available();

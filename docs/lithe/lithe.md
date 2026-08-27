@@ -1841,6 +1841,9 @@ materialized f32 elementwise work, then checks native Metal availability. Its
 binding supports whole-vector, scalar-epilogue, and masked tails; all other
 plans retain an explicit fallback decision. Binding does not emit a kernel or
 retain a device handle, so it remains an optional backend-only operation.
+`lower_vector_plan_for_metal` carries that admitted plan and a non-owning
+`device::kernel_plan` into the existing MSL emitter. It refuses emission unless
+both contracts agree, so vector admission cannot bypass the device ABI.
 
 Vulkan and MoltenVK consume the same plan through
 `bind_vector_plan_for_vulkan(vector_plan, kernel_plan)`. The binding is portable
