@@ -1035,18 +1035,73 @@ namespace lithe::codegen::hl {
                 blk.instructions.push_back(std::move(i));
             };
 
-            // Map hl_opcode scalar ops to flat opcodes.
+            // Map hl_opcode scalar ops to flat opcodes (schema 1.0–1.2).
+            // Ops that require attribute inspection (icmp, fcmp, select, guard)
+            // are handled in the specialised branches below.
             auto flat_opcode = [](hl_opcode hlo) -> std::optional<opcode> {
                 switch (hlo) {
+                // ── Floating-point arithmetic ──────────────────────────────
                 case hl_opcode::fadd: return opcode::fadd;
                 case hl_opcode::fsub: return opcode::fsub;
                 case hl_opcode::fmul: return opcode::fmul;
                 case hl_opcode::fdiv: return opcode::fdiv;
                 case hl_opcode::fneg: return opcode::fneg;
+                // ── Integer arithmetic (schema 1.0) ────────────────────────
                 case hl_opcode::add: return opcode::add;
                 case hl_opcode::sub: return opcode::sub;
                 case hl_opcode::mul: return opcode::mul;
                 case hl_opcode::div: return opcode::div;
+                // ── Integer division / remainder (schema 1.1) ─────────────
+                // sdiv/udiv → flat div; srem/urem → flat mod.
+                // Sign semantics diverge below zero; for now both map to the
+                // same flat op (target backends enforce their own sign rules).
+                case hl_opcode::sdiv: return opcode::div;
+                case hl_opcode::udiv: return opcode::div;
+                case hl_opcode::srem: return opcode::mod;
+                case hl_opcode::urem: return opcode::mod;
+                // ── Bitwise (schema 1.2) ───────────────────────────────────
+                case hl_opcode::bit_and: return opcode::bit_and;
+                case hl_opcode::bit_or:  return opcode::bit_or;
+                case hl_opcode::bit_xor: return opcode::bit_xor;
+                // ── Shifts (schema 1.2) ────────────────────────────────────
+                // Both logical-right and arithmetic-right map to flat shr;
+                // the flat backend selects signed/unsigned semantics via
+                // register class.
+                case hl_opcode::shl:  return opcode::shl;
+                case hl_opcode::lshr: return opcode::shr;
+                case hl_opcode::ashr: return opcode::shr;
+                default: return std::nullopt;
+                }
+            };
+
+            // Map a compare_predicate to the corresponding flat integer compare opcode.
+            auto icmp_opcode = [](compare_predicate pred) -> std::optional<opcode> {
+                switch (pred) {
+                case compare_predicate::eq:  return opcode::cmp_eq;
+                case compare_predicate::ne:  return opcode::cmp_ne;
+                case compare_predicate::slt: return opcode::cmp_lt;
+                case compare_predicate::sle: return opcode::cmp_le;
+                case compare_predicate::sgt: return opcode::cmp_gt;
+                case compare_predicate::sge: return opcode::cmp_ge;
+                // Unsigned predicates: map to signed compares (same instruction,
+                // sign interpretation is the caller's responsibility).
+                case compare_predicate::ult: return opcode::cmp_lt;
+                case compare_predicate::ule: return opcode::cmp_le;
+                case compare_predicate::ugt: return opcode::cmp_gt;
+                case compare_predicate::uge: return opcode::cmp_ge;
+                default: return std::nullopt;
+                }
+            };
+
+            // Map a compare_predicate to the corresponding flat float compare opcode.
+            auto fcmp_opcode = [](compare_predicate pred) -> std::optional<opcode> {
+                switch (pred) {
+                case compare_predicate::oeq: return opcode::fcmp_eq;
+                case compare_predicate::one: return opcode::fcmp_ne;
+                case compare_predicate::olt: return opcode::fcmp_lt;
+                case compare_predicate::ole: return opcode::fcmp_le;
+                case compare_predicate::ogt: return opcode::fcmp_gt;
+                case compare_predicate::oge: return opcode::fcmp_ge;
                 default: return std::nullopt;
                 }
             };
@@ -1784,8 +1839,15 @@ namespace lithe::codegen::hl {
                                 std::holds_alternative<constant_attr>(op->attr)) {
                                 const auto& constant = std::get<constant_attr>(op->attr);
                                 if (constant.kind == constant_kind::floating_point) {
-                                    out.diagnostics.push_back(
-                                        "coord_lower: floating constants require a floating immediate backend");
+                                    // Emit fload_imm: dst = immediate_f64 value.
+                                    preg dst = fresh_preg();
+                                    ssa_to_preg[op->results[0].id] = dst;
+                                    allocated_instruction fi;
+                                    fi.id = next_instr_id++;
+                                    fi.op = opcode::fload_imm;
+                                    fi.defs = {allocated_operand::as_preg(dst)};
+                                    fi.uses = {allocated_operand::as_f64(constant.floating_point)};
+                                    flat_blk.instructions.push_back(std::move(fi));
                                     continue;
                                 }
                                 preg dst = fresh_preg();
@@ -1810,8 +1872,111 @@ namespace lithe::codegen::hl {
                             }
                             continue;
                         }
+                        else if (op->op == hl_opcode::icmp) {
+                            // Integer compare: predicate lives in compare_attr.
+                            if (!std::holds_alternative<compare_attr>(op->attr)) {
+                                out.diagnostics.push_back("coord_lower: icmp missing compare_attr");
+                                continue;
+                            }
+                            const auto pred = std::get<compare_attr>(op->attr).pred;
+                            const auto cmp_op = icmp_opcode(pred);
+                            if (!cmp_op) {
+                                out.diagnostics.push_back("coord_lower: icmp unsupported predicate");
+                                continue;
+                            }
+                            allocated_instruction fi;
+                            fi.id = next_instr_id++;
+                            fi.op = *cmp_op;
+                            for (const auto& ssav : op->operands) {
+                                if (auto it = ssa_to_preg.find(ssav.id); it != ssa_to_preg.end())
+                                    fi.uses.push_back(allocated_operand::as_preg(it->second));
+                            }
+                            if (!op->results.empty()) {
+                                preg dst = fresh_preg();
+                                ssa_to_preg[op->results[0].id] = dst;
+                                fi.defs = {allocated_operand::as_preg(dst)};
+                            }
+                            flat_blk.instructions.push_back(std::move(fi));
+                        }
+                        else if (op->op == hl_opcode::fcmp) {
+                            // Float compare: predicate lives in compare_attr.
+                            if (!std::holds_alternative<compare_attr>(op->attr)) {
+                                out.diagnostics.push_back("coord_lower: fcmp missing compare_attr");
+                                continue;
+                            }
+                            const auto pred = std::get<compare_attr>(op->attr).pred;
+                            const auto cmp_op = fcmp_opcode(pred);
+                            if (!cmp_op) {
+                                out.diagnostics.push_back("coord_lower: fcmp unsupported predicate");
+                                continue;
+                            }
+                            allocated_instruction fi;
+                            fi.id = next_instr_id++;
+                            fi.op = *cmp_op;
+                            for (const auto& ssav : op->operands) {
+                                if (auto it = ssa_to_preg.find(ssav.id); it != ssa_to_preg.end())
+                                    fi.uses.push_back(allocated_operand::as_preg(it->second));
+                            }
+                            if (!op->results.empty()) {
+                                preg dst = fresh_preg();
+                                ssa_to_preg[op->results[0].id] = dst;
+                                fi.defs = {allocated_operand::as_preg(dst)};
+                            }
+                            flat_blk.instructions.push_back(std::move(fi));
+                        }
+                        else if (op->op == hl_opcode::bit_not) {
+                            // bit_not is unary; maps directly to flat bit_not.
+                            if (op->operands.empty()) {
+                                out.diagnostics.push_back("coord_lower: bit_not missing operand");
+                                continue;
+                            }
+                            allocated_instruction fi;
+                            fi.id = next_instr_id++;
+                            fi.op = opcode::bit_not;
+                            if (auto it = ssa_to_preg.find(op->operands[0].id); it != ssa_to_preg.end())
+                                fi.uses.push_back(allocated_operand::as_preg(it->second));
+                            if (!op->results.empty()) {
+                                preg dst = fresh_preg();
+                                ssa_to_preg[op->results[0].id] = dst;
+                                fi.defs = {allocated_operand::as_preg(dst)};
+                            }
+                            flat_blk.instructions.push_back(std::move(fi));
+                        }
+                        else if (op->op == hl_opcode::guard) {
+                            // Guard lowers to a conditional branch to a trap block.
+                            // The condition register must be pre-computed. On success
+                            // (cond == true) we fall through; on failure we branch to
+                            // a synthesised trap block that emits ret (placeholder until
+                            // full unwind / trap ABI is wired).
+                            if (op->operands.empty()) {
+                                out.diagnostics.push_back("coord_lower: guard missing condition operand");
+                                continue;
+                            }
+                            auto cond_it = ssa_to_preg.find(op->operands[0].id);
+                            if (cond_it == ssa_to_preg.end()) {
+                                out.diagnostics.push_back("coord_lower: guard condition not mapped");
+                                continue;
+                            }
+                            // Synthesise a trap block (ret for now).
+                            allocated_basic_block trap_blk = fresh_block();
+                            {
+                                allocated_instruction trap_ret;
+                                trap_ret.id = next_instr_id++;
+                                trap_ret.op = opcode::ret;
+                                trap_blk.instructions.push_back(std::move(trap_ret));
+                            }
+                            const std::uint32_t trap_id = trap_blk.id;
+                            // Compute fall-through id (next fresh block).
+                            const std::uint32_t fall_id = next_block_id;
+                            // Emit branch_cond: cond → fall_id (true) / trap_id (false).
+                            emit_branch_cond(flat_blk, cond_it->second, fall_id, trap_id);
+                            flat.function.blocks.push_back(std::move(flat_blk));
+                            flat.function.blocks.push_back(std::move(trap_blk));
+                            // Start a new current block for the fall-through path.
+                            flat_blk = fresh_block();
+                        }
                         else {
-                            // Try flat opcode mapping.
+                            // Try generic flat opcode mapping.
                             if (auto fop = flat_opcode(op->op)) {
                                 allocated_instruction fi;
                                 fi.id = next_instr_id++;

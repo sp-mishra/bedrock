@@ -59,6 +59,11 @@ namespace lithe::codegen::backends {
             return hn::Lanes(d);
         }
 
+        [[nodiscard]] static std::size_t int32_lanes() noexcept {
+            const hn::ScalableTag<std::int32_t> d;
+            return hn::Lanes(d);
+        }
+
         // out[i] = a[i] + b[i]
         static void add(std::span<const float> a, std::span<const float> b,
                         std::span<float> out) noexcept {
@@ -76,6 +81,36 @@ namespace lithe::codegen::backends {
             }
         }
 
+        // out[i] = a[i] + b[i]  (double)
+        static void add(std::span<const double> a, std::span<const double> b,
+                        std::span<double> out) noexcept {
+            const std::size_t n = std::min({a.size(), b.size(), out.size()});
+            const hn::ScalableTag<double> d;
+            const std::size_t lanes = hn::Lanes(d);
+            std::size_t i = 0;
+            for (; i + lanes <= n; i += lanes) {
+                const auto va = hn::LoadU(d, a.data() + i);
+                const auto vb = hn::LoadU(d, b.data() + i);
+                hn::StoreU(hn::Add(va, vb), d, out.data() + i);
+            }
+            for (; i < n; ++i) out[i] = a[i] + b[i];
+        }
+
+        // out[i] = a[i] + b[i]  (int32_t)
+        static void add(std::span<const std::int32_t> a, std::span<const std::int32_t> b,
+                        std::span<std::int32_t> out) noexcept {
+            const std::size_t n = std::min({a.size(), b.size(), out.size()});
+            const hn::ScalableTag<std::int32_t> d;
+            const std::size_t lanes = hn::Lanes(d);
+            std::size_t i = 0;
+            for (; i + lanes <= n; i += lanes) {
+                const auto va = hn::LoadU(d, a.data() + i);
+                const auto vb = hn::LoadU(d, b.data() + i);
+                hn::StoreU(hn::Add(va, vb), d, out.data() + i);
+            }
+            for (; i < n; ++i) out[i] = a[i] + b[i];
+        }
+
         // out[i] = a[i] * b[i]
         static void mul(std::span<const float> a, std::span<const float> b,
                         std::span<float> out) noexcept {
@@ -91,6 +126,36 @@ namespace lithe::codegen::backends {
             for (; i < n; ++i) {
                 out[i] = a[i] * b[i];
             }
+        }
+
+        // out[i] = a[i] * b[i]  (double)
+        static void mul(std::span<const double> a, std::span<const double> b,
+                        std::span<double> out) noexcept {
+            const std::size_t n = std::min({a.size(), b.size(), out.size()});
+            const hn::ScalableTag<double> d;
+            const std::size_t lanes = hn::Lanes(d);
+            std::size_t i = 0;
+            for (; i + lanes <= n; i += lanes) {
+                const auto va = hn::LoadU(d, a.data() + i);
+                const auto vb = hn::LoadU(d, b.data() + i);
+                hn::StoreU(hn::Mul(va, vb), d, out.data() + i);
+            }
+            for (; i < n; ++i) out[i] = a[i] * b[i];
+        }
+
+        // out[i] = a[i] * b[i]  (int32_t)
+        static void mul(std::span<const std::int32_t> a, std::span<const std::int32_t> b,
+                        std::span<std::int32_t> out) noexcept {
+            const std::size_t n = std::min({a.size(), b.size(), out.size()});
+            const hn::ScalableTag<std::int32_t> d;
+            const std::size_t lanes = hn::Lanes(d);
+            std::size_t i = 0;
+            for (; i + lanes <= n; i += lanes) {
+                const auto va = hn::LoadU(d, a.data() + i);
+                const auto vb = hn::LoadU(d, b.data() + i);
+                hn::StoreU(hn::Mul(va, vb), d, out.data() + i);
+            }
+            for (; i < n; ++i) out[i] = a[i] * b[i];
         }
 
         // out[i] = alpha * x[i] + y[i]  (fused multiply-add where available)
@@ -111,6 +176,22 @@ namespace lithe::codegen::backends {
             }
         }
 
+        // out[i] = alpha * x[i] + y[i]  (double)
+        static void axpy(double alpha, std::span<const double> x,
+                         std::span<const double> y, std::span<double> out) noexcept {
+            const std::size_t n = std::min({x.size(), y.size(), out.size()});
+            const hn::ScalableTag<double> d;
+            const std::size_t lanes = hn::Lanes(d);
+            const auto valpha = hn::Set(d, alpha);
+            std::size_t i = 0;
+            for (; i + lanes <= n; i += lanes) {
+                const auto vx = hn::LoadU(d, x.data() + i);
+                const auto vy = hn::LoadU(d, y.data() + i);
+                hn::StoreU(hn::MulAdd(valpha, vx, vy), d, out.data() + i);
+            }
+            for (; i < n; ++i) out[i] = alpha * x[i] + y[i];
+        }
+
         // Horizontal sum over the whole span (vectorized accumulation + tail).
         [[nodiscard]] static float reduce_sum(std::span<const float> a) noexcept {
             const hn::ScalableTag<float> d;
@@ -124,6 +205,20 @@ namespace lithe::codegen::backends {
             for (; i < a.size(); ++i) {
                 total += a[i]; // scalar tail
             }
+            return total;
+        }
+
+        // Horizontal sum (double).
+        [[nodiscard]] static double reduce_sum(std::span<const double> a) noexcept {
+            const hn::ScalableTag<double> d;
+            const std::size_t lanes = hn::Lanes(d);
+            auto acc = hn::Zero(d);
+            std::size_t i = 0;
+            for (; i + lanes <= a.size(); i += lanes) {
+                acc = hn::Add(acc, hn::LoadU(d, a.data() + i));
+            }
+            double total = hn::ReduceSum(d, acc);
+            for (; i < a.size(); ++i) total += a[i];
             return total;
         }
     };
@@ -150,12 +245,19 @@ namespace lithe::codegen::backends {
     [[nodiscard]] inline simd_plan_binding bind_vector_plan(const hl::vector_plan& plan) noexcept {
         simd_plan_binding out;
         out.planned_lanes = plan.lanes;
-        out.native_lanes = static_cast<std::uint32_t>(simd_kernels::float_lanes());
         out.tail = plan.tail;
         const bool compatible_tail = plan.tail == hl::vector_tail_strategy::none
             || plan.tail == hl::vector_tail_strategy::scalar_epilogue;
+        if (plan.element_bits == 32) {
+            out.native_lanes = static_cast<std::uint32_t>(simd_kernels::float_lanes());
+        } else if (plan.element_bits == 64) {
+            out.native_lanes = static_cast<std::uint32_t>(simd_kernels::double_lanes());
+        } else {
+            out.native_lanes = 0;
+        }
         if (plan.legality == hl::vector_plan_legality::proven && plan.schedule_materialized
-            && plan.element_bits == 32 && plan.reduction == hl::vector_reduction_shape::none
+            && (plan.element_bits == 32 || plan.element_bits == 64)
+            && plan.reduction == hl::vector_reduction_shape::none
             && compatible_tail && out.native_lanes != 0) {
             out.disposition = simd_plan_disposition::accepted;
         }
@@ -192,13 +294,13 @@ namespace lithe::codegen::backends {
         return {.binding = bind_vector_plan(plan), .operation = operation};
     }
 
-    template <class ScalarFallback>
-        requires std::invocable<ScalarFallback&, std::span<const float>, std::span<const float>, std::span<float>>
+    template <class T, class ScalarFallback>
+        requires std::invocable<ScalarFallback&, std::span<const T>, std::span<const T>, std::span<T>>
     [[nodiscard]] inline simd_execution_path execute_simd_binary(
         const simd_binary_lowering& lowering,
-        const std::span<const float> lhs,
-        const std::span<const float> rhs,
-        const std::span<float> output,
+        const std::span<const T> lhs,
+        const std::span<const T> rhs,
+        const std::span<T> output,
         ScalarFallback&& scalar_fallback) noexcept(noexcept(std::invoke(
             scalar_fallback, lhs, rhs, output))) {
         const bool matching_extents = lhs.size() == rhs.size() && lhs.size() == output.size();
@@ -215,6 +317,24 @@ namespace lithe::codegen::backends {
         case simd_binary_operation::multiply: simd_kernels::mul(lhs, rhs, output); break;
         }
         return simd_execution_path::vectorized;
+    }
+
+    // float overload with fixed-extent span conversion so legacy call sites
+    // using std::span{const_array} (fixed-extent) continue to compile without
+    // an explicit template argument.
+    template <std::size_t N1, std::size_t N2, std::size_t N3, class ScalarFallback>
+    [[nodiscard]] inline simd_execution_path execute_simd_binary(
+        const simd_binary_lowering& lowering,
+        const std::span<const float, N1> lhs,
+        const std::span<const float, N2> rhs,
+        const std::span<float, N3> output,
+        ScalarFallback&& scalar_fallback) {
+        return execute_simd_binary<float>(
+            lowering,
+            std::span<const float>{lhs},
+            std::span<const float>{rhs},
+            std::span<float>{output},
+            std::forward<ScalarFallback>(scalar_fallback));
     }
 
     // ============================================================================

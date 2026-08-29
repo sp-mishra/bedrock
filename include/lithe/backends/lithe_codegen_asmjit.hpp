@@ -33,7 +33,11 @@ namespace lithe::codegen::backends {
     // ---------------------------------------------------------------------------
     struct jit_function_handle {
         using fn_i64_t = std::int64_t (*)(std::int64_t, std::int64_t);
-        using fn_f64_t = double (*)(std::int64_t, std::int64_t);
+        // AArch64 AAPCS64 §6.8.2: double args pass in D0/D1, not X0/X1.
+        // Using int64_t args here would produce a silent wrong-answer bug on
+        // Apple Silicon because the caller loads doubles into D-registers while
+        // AsmJIT-emitted code reads integer X-registers.
+        using fn_f64_t = double (*)(double, double);
 
         // JitRuntime is non-copyable, so we heap-allocate it.
         std::unique_ptr<asmjit::JitRuntime> runtime;
@@ -80,7 +84,7 @@ namespace lithe::codegen::backends {
             return fn_ptr(a, b);
         }
 
-        [[nodiscard]] double call_f64(const std::int64_t a, const std::int64_t b) const {
+        [[nodiscard]] double call_f64(const double a, const double b) const {
             if (fn_ptr_f64 == nullptr) {
                 throw std::logic_error("jit_function_handle: call_f64() on non-f64 or invalid handle");
             }
@@ -762,9 +766,12 @@ namespace lithe::codegen::backends {
             return spill_map.emplace(slot, mem).first->second;
         }
 
-        // Translate arg/return descriptors to AsmJit TypeId (integer-only for now).
+        // Translate arg/return descriptors to AsmJit TypeId.
+        // Floating-point arguments use kFloat64 so AsmJIT generates correct
+        // ABI-compliant D-register usage on AArch64 (AAPCS64 §6.8.2).
         static asmjit::TypeId mir_type_to_asmjit(const argument_descriptor& arg) {
-            (void)arg;
+            if (arg.reg_class == register_class::floating || arg.floating_point)
+                return asmjit::TypeId::kFloat64;
             return asmjit::TypeId::kInt64;
         }
 

@@ -1445,3 +1445,52 @@ TEST_CASE ("jit_function_handle default-constructed handle is invalid",
     REQUIRE_THROWS_AS(h.call_f64(0, 0), std::logic_error);
 }
 #endif
+
+// ============================================================================
+// GAP-3: fn_f64_t is double(*)(double, double) — correct ABI
+// ============================================================================
+
+#if defined(LITHE_HAS_ASMJIT)
+namespace {
+    // Reference function: takes two doubles, returns their product.
+    static double gap3_f64_mul(double a, double b) noexcept { return a * b; }
+} // anonymous namespace
+
+TEST_CASE ("fn_f64_t accepts double arguments (GAP-3 ABI fix)",
+          "[lithe][asmjit][gap3][abi]") {
+    // Verify the type alias matches double(*)(double, double).
+    static_assert(std::is_same_v<jit_function_handle::fn_f64_t,
+                                 double (*)(double, double)>,
+                  "fn_f64_t must be double(*)(double, double) — GAP-3 ABI fix");
+
+    // Assign a native function with the correct double-arg signature.
+    jit_function_handle h;
+    h.fn_ptr_f64 = &gap3_f64_mul;
+
+    REQUIRE(h.valid());
+    REQUIRE(h.returns_f64());
+    // Floating-point arguments are correctly passed as doubles.
+    CHECK(h.call_f64(2.5, 4.0) == Catch::Approx(10.0));
+    CHECK(h.call_f64(-1.0, 3.0) == Catch::Approx(-3.0));
+    CHECK(h.call_f64(0.0, 99.9) == Catch::Approx(0.0));
+}
+
+TEST_CASE ("JIT-compiled f64 function returns correct result via call_f64 (GAP-3)",
+          "[lithe][asmjit][gap3][abi]") {
+    // JIT a function that computes 1.5 + 2.5 = 4.0 using fload_imm + fadd.
+    // Then call it via call_f64(0, 0) — the args are ignored (constants),
+    // but the call must succeed with the double-returning signature.
+    auto h = jit(fn_fp_add());
+    REQUIRE(h->returns_f64());
+    CHECK(h->call_f64(0.0, 0.0) == Catch::Approx(4.0));
+}
+
+TEST_CASE ("JIT-compiled f64 function: call_f64 with non-zero args does not corrupt result (GAP-3)",
+          "[lithe][asmjit][gap3][abi]") {
+    // The JIT function uses only fload_imm (no load_arg) so the double args
+    // passed to call_f64 are unused — but they must not corrupt registers.
+    auto h = jit(fn_fp_mul());
+    REQUIRE(h->returns_f64());
+    CHECK(h->call_f64(3.14, 2.71) == Catch::Approx(6.0));
+}
+#endif

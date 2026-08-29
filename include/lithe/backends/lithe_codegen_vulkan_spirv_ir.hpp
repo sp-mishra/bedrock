@@ -15,8 +15,11 @@
 //                         SPIR-V modules ride the same print/store/validate paths
 //                         as every other IR — no new CPOs, lithe::ir uncoupled.
 //
-// Structural validation only (not semantic re-typing): magic word, an OpEntryPoint,
-// an OpExecutionMode LocalSize, and OpCapability within MoltenVK's supported set.
+// Validation: structural checks (magic, OpEntryPoint, OpExecutionMode LocalSize,
+// OpCapability whitelist) plus result-id uniqueness (O(n) forward scan).
+// Duplicate result IDs are undefined behaviour per SPIR-V spec §2.4 and
+// typically crash the Vulkan driver without any diagnostic.
+//
 // No external SPIR-V library — a small forward word-walker parses the module.
 //
 // No virtual, no macros.  Header-only C++23.
@@ -27,6 +30,7 @@
 #include <expected>
 #include <span>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "../lithe_ir/provider.hpp"   // ir_resolution_state, cpo::{export_text,export_binary,validate_ir}, ir_error
@@ -108,6 +112,51 @@ namespace lithe::codegen::backends {
     inline constexpr std::uint32_t k_capability_shader = 1u; // Shader (MoltenVK-supported)
     inline constexpr std::size_t k_spirv_header_words = 5u; // magic,version,generator,bound,schema
 
+    // Opcodes that carry (result-type-id, result-id) as their first two operands.
+    // This covers the instructions emitted by emit_spirv_binary_elementwise and the
+    // most common compute opcodes.
+    [[nodiscard]] constexpr bool spirv_opcode_has_result(const std::uint16_t opcode) noexcept {
+        // SPIR-V unified opcode list — only value-producing instructions.
+        switch (opcode) {
+        case 41:  // OpConstantTrue
+        case 42:  // OpConstantFalse
+        case 43:  // OpConstant
+        case 44:  // OpConstantComposite
+        case 54:  // OpFunction
+        case 59:  // OpVariable
+        case 60:  // OpImageTexelPointer
+        case 61:  // OpLoad
+        case 65:  // OpAccessChain
+        case 67:  // OpInBoundsAccessChain
+        case 77:  // OpVectorShuffle
+        case 80:  // OpCompositeExtract
+        case 81:  // OpCompositeInsert
+        case 124: // OpSNegate
+        case 125: // OpFNegate
+        case 126: // OpIAdd
+        case 127: // OpISub
+        case 128: // OpIMul
+        case 129: // OpFAdd
+        case 130: // OpFSub
+        case 132: // OpFMul
+        case 133: // OpFDiv
+        case 169: // OpAtomicIAdd
+        case 180: // OpAtomicLoad
+        case 267: // OpSLessThan
+        case 268: // OpULessThan
+        case 269: // OpFOrdLessThan
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    // Type-defining opcodes (OpTypeXxx): carry (result-id) as first operand (no type-id).
+    [[nodiscard]] constexpr bool spirv_opcode_is_type(const std::uint16_t opcode) noexcept {
+        // OpTypeVoid=19 through OpTypeForwardPointer=39
+        return opcode >= 19u && opcode <= 39u;
+    }
+
     // =========================================================================
     // spirv_module — a compute SPIR-V module ready for vkCreateShaderModule.
     // =========================================================================
@@ -127,37 +176,40 @@ namespace lithe::codegen::backends {
             return h;
         }
 
-        // Structural validation.  Populates local_{x,y,z} from OpExecutionMode
-        // LocalSize when present.  Returns the resolution verdict:
+        // Structural + result-id uniqueness validation.
+        // Populates local_{x,y,z} from OpExecutionMode LocalSize when present.
+        // Returns:
         //   resolved                        — well-formed compute module.
-        //   unresolved_required_operations  — bad magic / truncated / no entry point
-        //                                      / unsupported capability.
+        //   unresolved_required_operations  — bad magic / truncated / no entry
+        //                                     point / unsupported capability /
+        //                                     duplicate result ID.
         [[nodiscard]] ir::ir_resolution_state validate() noexcept {
             using ir::ir_resolution_state;
             if (words.size() < k_spirv_header_words || words[0] != k_spirv_magic)
                 return ir_resolution_state::unresolved_required_operations;
 
+            const std::uint32_t id_bound = words[3];
             bool have_entry_point = false;
+            std::unordered_set<std::uint32_t> seen_ids;
+            seen_ids.reserve(id_bound < 4096u ? id_bound : 64u);
+
             std::size_t i = k_spirv_header_words;
             while (i < words.size()) {
                 const std::uint32_t inst = words[i];
                 const std::uint16_t opcode = static_cast<std::uint16_t>(inst & 0xFFFFu);
                 const std::uint16_t wcount = static_cast<std::uint16_t>(inst >> 16);
                 if (wcount == 0 || i + wcount > words.size())
-                    return ir_resolution_state::unresolved_required_operations; // truncated / malformed
+                    return ir_resolution_state::unresolved_required_operations;
 
                 switch (opcode) {
                 case k_op_entry_point:
                     have_entry_point = true;
                     break;
                 case k_op_capability:
-                    // words[i+1] = capability id.  Reject anything MoltenVK
-                    // cannot lower (only Shader accepted structurally).
                     if (wcount >= 2 && words[i + 1] != k_capability_shader)
                         return ir_resolution_state::unresolved_required_operations;
                     break;
                 case k_op_execution_mode:
-                    // layout: [inst] [entry-point id] [mode] [operands...]
                     if (wcount >= 6 && words[i + 2] == k_exec_mode_localsize) {
                         local_x = words[i + 3];
                         local_y = words[i + 4];
@@ -167,6 +219,20 @@ namespace lithe::codegen::backends {
                 default:
                     break;
                 }
+
+                // Result-id uniqueness: value-producing opcodes have
+                // (result-type-id at [i+1], result-id at [i+2]).
+                // Type-defining opcodes have (result-id at [i+1]).
+                if (spirv_opcode_has_result(opcode) && wcount >= 3) {
+                    const std::uint32_t rid = words[i + 2];
+                    if (rid != 0 && !seen_ids.insert(rid).second)
+                        return ir_resolution_state::unresolved_required_operations;
+                } else if (spirv_opcode_is_type(opcode) && wcount >= 2) {
+                    const std::uint32_t rid = words[i + 1];
+                    if (rid != 0 && !seen_ids.insert(rid).second)
+                        return ir_resolution_state::unresolved_required_operations;
+                }
+
                 i += wcount;
             }
             return have_entry_point

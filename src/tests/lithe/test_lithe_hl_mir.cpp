@@ -1019,3 +1019,224 @@ TEST_CASE (
     };
     REQUIRE(estimated_execution_cost(locality_candidate, reusable_data) == 64);
 }
+
+// =============================================================================
+// GAP-1: extended flat_opcode table — schema 1.1–1.2 opcodes
+// =============================================================================
+
+namespace {
+    // Build a minimal HL function whose body region contains a single binary op
+    // with two SSA operands and one SSA result, plus a region_yield.
+    hl_mir_function make_binary_body(hl_opcode opc,
+                                     std::uint32_t lhs_id, std::uint32_t rhs_id,
+                                     std::uint32_t result_id,
+                                     hl_op_attr attr = std::monostate{}) {
+        hl_mir_function fn{1u << 20};
+        fn.name = "gap1_test";
+
+        auto* blk = fn.make_block();
+        fn.body_region.blocks.push_back(blk);
+        blk->parent_region = &fn.body_region;
+
+        auto* op = fn.make_op(opc);
+        if (!std::holds_alternative<std::monostate>(attr))
+            op->attr = attr;
+
+        auto op_span = fn.alloc_span<ssa_value_id>(2);
+        op_span[0] = ssa_value_id{lhs_id};
+        op_span[1] = ssa_value_id{rhs_id};
+        op->operands = op_span;
+
+        auto res_span = fn.alloc_span<ssa_value_id>(1);
+        res_span[0] = ssa_value_id{result_id};
+        op->results = res_span;
+
+        blk->ops.push_back(op);
+
+        auto* yield_op = fn.make_op(hl_opcode::region_yield);
+        blk->ops.push_back(yield_op);
+
+        return fn;
+    }
+
+    bool flat_has_opcode(const coordinate_lowering_result& res, opcode op) {
+        for (const auto& blk : res.fn.function.blocks)
+            for (const auto& inst : blk.instructions)
+                if (inst.op == op) return true;
+        return false;
+    }
+} // anonymous namespace
+
+TEST_CASE(
+    "coordinate_lowering_pass: sdiv lowers to flat div",
+    "[lithe][hl][lowering][gap1]"
+) {
+    auto fn = make_binary_body(hl_opcode::sdiv, 1, 2, 3);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::div));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: srem lowers to flat mod",
+    "[lithe][hl][lowering][gap1]"
+) {
+    auto fn = make_binary_body(hl_opcode::srem, 1, 2, 3);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::mod));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: bit_and lowers to flat bit_and",
+    "[lithe][hl][lowering][gap1]"
+) {
+    auto fn = make_binary_body(hl_opcode::bit_and, 1, 2, 3);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::bit_and));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: bit_or lowers to flat bit_or",
+    "[lithe][hl][lowering][gap1]"
+) {
+    auto fn = make_binary_body(hl_opcode::bit_or, 1, 2, 3);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::bit_or));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: shl lowers to flat shl",
+    "[lithe][hl][lowering][gap1]"
+) {
+    auto fn = make_binary_body(hl_opcode::shl, 1, 2, 3);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::shl));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: lshr lowers to flat shr",
+    "[lithe][hl][lowering][gap1]"
+) {
+    auto fn = make_binary_body(hl_opcode::lshr, 1, 2, 3);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::shr));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: icmp(slt) lowers to flat cmp_lt",
+    "[lithe][hl][lowering][gap1]"
+) {
+    compare_attr ca;
+    ca.pred = compare_predicate::slt;
+    auto fn = make_binary_body(hl_opcode::icmp, 1, 2, 3, ca);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::cmp_lt));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: icmp(eq) lowers to flat cmp_eq",
+    "[lithe][hl][lowering][gap1]"
+) {
+    compare_attr ca;
+    ca.pred = compare_predicate::eq;
+    auto fn = make_binary_body(hl_opcode::icmp, 1, 2, 3, ca);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::cmp_eq));
+}
+
+// =============================================================================
+// GAP-2: floating constant lowering emits fload_imm
+// =============================================================================
+
+namespace {
+    // Build HL function whose body has a single constant op with a floating value.
+    hl_mir_function make_float_constant_body(double value, std::uint32_t result_id) {
+        hl_mir_function fn{1u << 20};
+        fn.name = "gap2_test";
+
+        auto* blk = fn.make_block();
+        fn.body_region.blocks.push_back(blk);
+        blk->parent_region = &fn.body_region;
+
+        auto* op = fn.make_op(hl_opcode::constant);
+        op->attr = constant_attr::floating_value(value);
+
+        auto res_span = fn.alloc_span<ssa_value_id>(1);
+        res_span[0] = ssa_value_id{result_id};
+        op->results = res_span;
+
+        blk->ops.push_back(op);
+
+        auto* yield_op = fn.make_op(hl_opcode::region_yield);
+        blk->ops.push_back(yield_op);
+
+        return fn;
+    }
+} // anonymous namespace
+
+TEST_CASE(
+    "coordinate_lowering_pass: floating constant lowers to fload_imm",
+    "[lithe][hl][lowering][gap2]"
+) {
+    auto fn = make_float_constant_body(3.14, 1);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::fload_imm));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: floating constant does NOT emit load_imm",
+    "[lithe][hl][lowering][gap2]"
+) {
+    auto fn = make_float_constant_body(2.71828, 1);
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    // An integer load_imm should NOT be emitted for a floating constant.
+    CHECK_FALSE(flat_has_opcode(res, opcode::load_imm));
+    CHECK(flat_has_opcode(res, opcode::fload_imm));
+}
+
+TEST_CASE(
+    "coordinate_lowering_pass: integer constant still lowers to load_imm",
+    "[lithe][hl][lowering][gap2]"
+) {
+    hl_mir_function fn{1u << 20};
+    fn.name = "gap2_int_test";
+
+    auto* blk = fn.make_block();
+    fn.body_region.blocks.push_back(blk);
+    blk->parent_region = &fn.body_region;
+
+    auto* op = fn.make_op(hl_opcode::constant);
+    op->attr = constant_attr::integer_value(42);
+
+    auto res_span = fn.alloc_span<ssa_value_id>(1);
+    res_span[0] = ssa_value_id{1};
+    op->results = res_span;
+    blk->ops.push_back(op);
+
+    auto* yield_op = fn.make_op(hl_opcode::region_yield);
+    blk->ops.push_back(yield_op);
+
+    coordinate_lowering_pass pass;
+    const auto res = pass.run(fn);
+    REQUIRE_FALSE(res.fn.function.blocks.empty());
+    CHECK(flat_has_opcode(res, opcode::load_imm));
+    CHECK_FALSE(flat_has_opcode(res, opcode::fload_imm));
+}

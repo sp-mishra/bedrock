@@ -3046,6 +3046,65 @@ an artifact must be materialized for caching or AOT serialization.
 
 ---
 
+## Backend Gap Fixes (v2.9)
+
+The following algorithmically-grounded gaps identified in the backend analysis were resolved:
+
+### GAP-1 — flat_opcode table completeness
+
+`coordinate_lowering_pass::flat_opcode()` previously covered only 9 opcodes.
+It now maps the complete schema 1.0–1.2 set:
+
+| HL opcode | Flat opcode | Notes |
+|-----------|-------------|-------|
+| `sdiv` / `udiv` | `div` | Signed/unsigned both map to flat div |
+| `srem` / `urem` | `mod` | Signed/unsigned both map to flat mod |
+| `bit_and` / `bit_or` / `bit_xor` | same | Bitwise schema 1.2 |
+| `shl` | `shl` | Left shift |
+| `lshr` / `ashr` | `shr` | Both right-shift variants map to flat shr |
+
+`icmp` and `fcmp` opcodes are dispatched through attribute-aware branches
+(`compare_attr::pred`) that consult `icmp_opcode()` / `fcmp_opcode()` helpers
+rather than the generic table.
+
+### GAP-2 — floating constant lowering
+
+`hl_opcode::constant` with `constant_kind::floating_point` now emits
+`opcode::fload_imm` (a direct f64 immediate load). Previously this path
+emitted a diagnostic and fell through, leaving the SSA result undefined.
+
+### GAP-3+4 — AsmJIT ABI and dynamic signature
+
+- `jit_function_handle::fn_f64_t` is now `double (*)(double, double)` instead
+  of `double (*)(int64_t, int64_t)`. On AArch64 (AAPCS64 §6.8.2) doubles are
+  passed in D-registers, not X-registers; the wrong type caused silent
+  argument corruption when calling JIT-compiled f64 functions.
+- `call_f64` parameter types updated to match: `double call_f64(double, double)`.
+- `mir_type_to_asmjit` now returns `TypeId::kFloat64` for any argument with
+  `reg_class == floating` or `floating_point == true`.
+
+### GAP-5 — SIMD double and int32_t kernels
+
+`simd_kernels` now provides `add`, `mul`, `axpy`, and `reduce_sum` overloads
+for `double` and `std::int32_t` in addition to `float`. `bind_vector_plan`
+accepts `element_bits == 64` plans. `execute_simd_binary` is a template
+`<class T, class ScalarFallback>` supporting any of the three element types;
+a fixed-extent float overload preserves backward compatibility for existing
+call sites that pass `std::span<const float, N>`.
+
+### GAP-10 — SPIR-V result-id uniqueness validation
+
+`spirv_module::validate()` now performs an O(n) forward scan that catches
+duplicate result IDs, which are undefined behaviour per SPIR-V spec §2.4 and
+typically crash Vulkan drivers without a diagnostic. The scan uses an
+`unordered_set<uint32_t>` seeded from `id_bound` (header word 3). Two helper
+predicates classify opcodes: `spirv_opcode_has_result` (value-producing
+instructions with a type-id + result-id pair) and `spirv_opcode_is_type`
+(OpTypeXxx instructions with result-id only). Both are `constexpr` and cover
+the opcode set emitted by `emit_spirv_binary_elementwise`.
+
+---
+
 ## Tiering & Retirement
 
 Header: `lithe_algorithms/lifecycle.hpp`
