@@ -168,6 +168,7 @@ namespace crank {
         std::vector<std::string> diagnostics;
         std::int64_t lower_ns = 0; // 0 on cache hit
         lithe::exec::execution_hint hint; // from hl_res.exec_hint
+        std::optional<std::uint64_t> mir_fingerprint; // cached FNV-1a hash, avoid recompute
 
         [[nodiscard]] bool ok() const noexcept {
             return phys != nullptr && diagnostics.empty();
@@ -216,7 +217,33 @@ namespace crank {
             return false;
         }
 
-        // Count instructions across all blocks of a physical MIR function.
+        // Fused single-pass MIR stats: block count, instruction count, branch count.
+        // Replaces three separate linear passes (count_instrs / count_branches /
+        // count_blocks) with one; callers that previously called all three pay 1/3 the
+        // iteration cost.
+        struct mir_stats {
+            std::uint32_t instr_count  = 0;
+            std::uint32_t branch_count = 0;
+            std::uint32_t block_count  = 0;
+        };
+
+        [[nodiscard]] inline mir_stats
+        compute_mir_stats(const lithe::codegen::mir::physical_mir_function& fn) noexcept {
+            mir_stats s;
+            s.block_count = static_cast<std::uint32_t>(fn.function.blocks.size());
+            for (const auto& blk : fn.function.blocks) {
+                s.instr_count += static_cast<std::uint32_t>(blk.instructions.size());
+                for (const auto& inst : blk.instructions) {
+                    if (inst.op == lithe::codegen::opcode::branch ||
+                        inst.op == lithe::codegen::opcode::branch_cond)
+                        ++s.branch_count;
+                }
+            }
+            return s;
+        }
+
+        // Legacy single-metric helpers — kept for source compatibility with any
+        // remaining callers that do not yet use compute_mir_stats directly.
         [[nodiscard]] inline std::uint32_t
         count_instrs(const lithe::codegen::mir::physical_mir_function& fn) noexcept {
             std::uint32_t n = 0;
@@ -314,9 +341,10 @@ namespace crank {
             using namespace lithe::codegen::backends;
 
             crank_execute_result res;
-            res.stats.instr_count = detail::count_instrs(phys_fn);
-            res.stats.branch_count = detail::count_branches(phys_fn);
-            res.stats.block_count = detail::count_blocks(phys_fn);
+            const auto ms = detail::compute_mir_stats(phys_fn);
+            res.stats.instr_count  = ms.instr_count;
+            res.stats.branch_count = ms.branch_count;
+            res.stats.block_count  = ms.block_count;
 
             auto t0 = std::chrono::steady_clock::now();
 
@@ -406,6 +434,10 @@ namespace crank {
         }
 
         res.phys = &*hl_res.cached_phys;
+        // Compute fingerprint once per physical MIR; cached for prepare_physical_native.
+        if (!hl_res.cached_fingerprint.has_value())
+            hl_res.cached_fingerprint = detail::fingerprint_physical_mir(*res.phys);
+        res.mir_fingerprint = hl_res.cached_fingerprint;
         return res;
     }
 
@@ -498,9 +530,10 @@ namespace crank {
                             execute_options opts = {},
                             const std::uint64_t unit_id = 0) {
         execute_stats stats;
-        stats.instr_count = detail::count_instrs(phys);
-        stats.branch_count = detail::count_branches(phys);
-        stats.block_count = detail::count_blocks(phys);
+        const auto ms = detail::compute_mir_stats(phys);
+        stats.instr_count  = ms.instr_count;
+        stats.branch_count = ms.branch_count;
+        stats.block_count  = ms.block_count;
 
         lithe::execution::compile_request req;
         req.hint = opts.hint;
@@ -509,7 +542,45 @@ namespace crank {
         // Compile cache key: stable hash of physical MIR shape + backend target.
         lithe::execution::aot_cache_key key;
         key.module_name = phys.function.name.empty() ? std::string{"crank_anon"} : phys.function.name;
-        key.source_hash = detail::fingerprint_physical_mir(phys);
+        key.source_hash = detail::fingerprint_physical_mir(phys);        key.backend_id = "asmjit";
+        key.opt_profile_id = "crank.execute_physical_native";
+        req.cache_key = key;
+
+        static lithe::execution::artifact_store s_native_store;
+
+        auto t0 = std::chrono::steady_clock::now();
+        auto prepared = lithe::execution::prepare_observed<Observer>(
+            phys, req, &s_native_store, unit_id);
+        auto t1 = std::chrono::steady_clock::now();
+        stats.execute_ns = static_cast<std::int64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()
+        );
+
+        return prepared_native_execution{std::move(prepared), stats};
+    }
+
+    // Overload: accepts lower_phase_result to reuse cached mir_fingerprint.
+    // Precondition: lp.ok() — caller must verify before calling.
+    template <class Observer = ::lang::telemetry::phase_observer<>>
+    [[nodiscard]] inline prepared_native_execution
+    prepare_physical_native(const lower_phase_result& lp,
+                            execute_options opts = {},
+                            const std::uint64_t unit_id = 0) {
+        const auto& phys = *lp.phys;
+        execute_stats stats;
+        const auto ms = detail::compute_mir_stats(phys);
+        stats.instr_count  = ms.instr_count;
+        stats.branch_count = ms.branch_count;
+        stats.block_count  = ms.block_count;
+
+        lithe::execution::compile_request req;
+        req.hint = opts.hint;
+        req.policy = {};
+
+        lithe::execution::aot_cache_key key;
+        key.module_name = phys.function.name.empty() ? std::string{"crank_anon"} : phys.function.name;
+        // Use cached fingerprint when available; fall back to recompute only if absent.
+        key.source_hash = lp.mir_fingerprint.value_or(detail::fingerprint_physical_mir(phys));
         key.backend_id = "asmjit";
         key.opt_profile_id = "crank.execute_physical_native";
         req.cache_key = key;
@@ -560,6 +631,19 @@ namespace crank {
             if (count_branches(phys) >= opts.hotness.branch_count) return true;
             if (count_blocks(phys) >= opts.hotness.block_count) return true;
             return count_instrs(phys) >= opts.hotness.instruction_count;
+        }
+
+        // Stats-accepting overload: avoids triple re-iteration when stats are already
+        // known (e.g. already computed by run_interpreter or prepare_physical_native).
+        [[nodiscard]] inline bool
+        should_use_native(const mir_stats& s,
+                          const execute_options& opts) noexcept {
+            if (opts.path == execute_options::execution_path::native_only)  return true;
+            if (opts.path == execute_options::execution_path::jit_preferred) return true;
+            if (opts.path == execute_options::execution_path::interpreter_only) return false;
+            if (s.branch_count >= opts.hotness.branch_count) return true;
+            if (s.block_count  >= opts.hotness.block_count)  return true;
+            return s.instr_count >= opts.hotness.instruction_count;
         }
     } // namespace detail
 
@@ -642,31 +726,52 @@ namespace crank {
         if (!lp.ok()) return res;
 
         const auto& phys_fn = *lp.phys;
-        res.stats.branch_count = detail::count_branches(phys_fn);
-        res.stats.block_count = detail::count_blocks(phys_fn);
+        // Single-pass stat collection — avoids triple iteration over MIR instructions.
+        const auto phys_ms = detail::compute_mir_stats(phys_fn);
+        res.stats.branch_count = phys_ms.branch_count;
+        res.stats.block_count  = phys_ms.block_count;
+        res.stats.instr_count  = phys_ms.instr_count;
 
         // §v2.7 — CFG functions now execute through the CFG-aware interpreter
         // (branch/branch_cond are followed). No execution paths are skipped; the
         // branch/block stats above remain informative. The interpreter backend
         // advertises branches support, so execute_with_fallback below is legal for
         // CFG functions too.
-        res.stats.instr_count = detail::count_instrs(phys_fn);
 
         if (opts.primary_backend_name.empty()) {
             // Auto path: choose interpreter vs native based on execute_options::path
             // and MIR shape. Native may still fallback internally if unavailable.
-            auto picked = detail::should_use_native(phys_fn, opts)
-                              ? execute_physical_native(phys_fn, args, opts)
-                              : detail::run_interpreter(phys_fn, args, opts);
-
-            res.return_value = picked.return_value;
-            res.overflow_trapped = picked.overflow_trapped;
-            res.stats.execute_ns = picked.stats.execute_ns;
-            res.stats.instr_count = picked.stats.instr_count;
-            res.fallback_fired = picked.fallback_fired;
-            res.stats.fallback_used = picked.stats.fallback_used;
-            for (auto& d : picked.diagnostics) res.diagnostics.push_back(std::move(d));
-            for (auto& n : picked.notes) res.notes.push_back(std::move(n));
+            if (detail::should_use_native(phys_ms, opts)) {
+                // Use lower_phase_result overload to skip fingerprint recomputation.
+                auto native = prepare_physical_native(lp, opts);
+                crank_execute_result picked;
+                picked.stats = native.preparation_stats();
+                picked.fallback_fired = native.fallback_fired();
+                picked.stats.fallback_used = picked.fallback_fired;
+                for (const auto& d : native.compilation().diagnostics) {
+                    if (detail::is_nonfatal_interp_note(d)) picked.notes.push_back(d);
+                    else picked.diagnostics.push_back(d);
+                }
+                picked.return_value = native.invoke(std::span<const std::int64_t>{args});
+                res.return_value = picked.return_value;
+                res.overflow_trapped = picked.overflow_trapped;
+                res.stats.execute_ns = picked.stats.execute_ns;
+                res.stats.instr_count = picked.stats.instr_count;
+                res.fallback_fired = picked.fallback_fired;
+                res.stats.fallback_used = picked.stats.fallback_used;
+                for (auto& d : picked.diagnostics) res.diagnostics.push_back(std::move(d));
+                for (auto& n : picked.notes) res.notes.push_back(std::move(n));
+            } else {
+                auto picked = detail::run_interpreter(phys_fn, args, opts);
+                res.return_value = picked.return_value;
+                res.overflow_trapped = picked.overflow_trapped;
+                res.stats.execute_ns = picked.stats.execute_ns;
+                res.stats.instr_count = picked.stats.instr_count;
+                res.fallback_fired = picked.fallback_fired;
+                res.stats.fallback_used = picked.stats.fallback_used;
+                for (auto& d : picked.diagnostics) res.diagnostics.push_back(std::move(d));
+                for (auto& n : picked.notes) res.notes.push_back(std::move(n));
+            }
             return res;
         }
 

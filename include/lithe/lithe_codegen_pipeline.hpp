@@ -575,7 +575,11 @@ namespace lithe::codegen {
             return result;
         }
 
-        void reset() noexcept { counters.clear(); }
+        void reset() noexcept { counters.clear(); tier2_fired = false; }
+
+        // Set when tiered_compile escalates to Tier 2. On subsequent calls,
+        // tiered_compile skips the counter scan and goes straight to Tier 2 emit.
+        bool tier2_fired = false;
     };
 
     struct mir_pass_context {

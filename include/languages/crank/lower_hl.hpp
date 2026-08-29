@@ -411,6 +411,10 @@ namespace crank {
         // subsequent calls so coordinate_lowering_pass runs only once per result.
         mutable std::optional<lithe::codegen::mir::physical_mir_function> cached_phys;
 
+        // Cached FNV-1a fingerprint of cached_phys; set once alongside cached_phys
+        // so prepare_physical_native skips recomputing it on every call.
+        mutable std::optional<std::uint64_t> cached_fingerprint;
+
         [[nodiscard]] bool ok() const noexcept { return diagnostics.empty(); }
     };
 

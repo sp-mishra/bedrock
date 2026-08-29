@@ -122,6 +122,10 @@ namespace lithe::codegen::backends {
         // register_file wrapper keeps map-like insert-on-write via operator[].
         register_file<std::int64_t> integer_registers;
         register_file<double> fp_registers;
+        // Direct-indexed spill storage: slot id → value. Pre-sized from max_spill_id
+        // found during begin_function; avoids hash-map overhead on spill hot path.
+        // Slot ids from coordinate_lowering_pass are dense; sentinel 0 = unwritten.
+        std::vector<std::int64_t> spill_flat;
         std::unordered_map<std::uint32_t, std::int64_t> spill_values;
         std::unordered_map<std::uint64_t, std::int64_t> memory_values;
         std::unordered_map<std::uint32_t, std::int64_t> stack_return_values;
@@ -136,6 +140,12 @@ namespace lithe::codegen::backends {
         std::optional<std::int64_t> return_value;
         bool halted = false;
 
+        // Structural cache — rebuilt only when the physical MIR pointer changes.
+        // Holds the block id→index map so emit_impl does not rebuild it each call.
+        const void* cached_fn_ptr_        = nullptr;
+        std::vector<std::size_t> cached_block_index_;
+        std::size_t cached_block_sentinel_ = 0;
+
         // §v2.7 CFG execution. A branch/branch_cond/ret instruction reports its
         // control-flow effect through a POD dispatch_action out-param on exec_fast;
         // the block-indexed dispatch loop in emit_impl consumes it and jumps/halts.
@@ -149,6 +159,7 @@ namespace lithe::codegen::backends {
         };
 
         void reset_runtime_state() {
+            spill_flat.assign(spill_flat.size(), std::int64_t{0});
             spill_values.clear();
             memory_values.clear();
             stack_return_values.clear();
@@ -160,12 +171,18 @@ namespace lithe::codegen::backends {
             active_return_location = std::nullopt;
             return_value = std::nullopt;
             halted = false;
+            // Note: cached_fn_ptr_ / cached_block_index_ are structural (immutable
+            // once lowered) and are NOT reset here.
         }
 
         void reset_all() {
             std::fill(integer_registers.begin(), integer_registers.end(), std::int64_t{0});
             std::fill(fp_registers.begin(), fp_registers.end(), 0.0);
+            spill_flat.clear();
             reset_runtime_state();
+            cached_fn_ptr_ = nullptr;
+            cached_block_index_.clear();
+            cached_block_sentinel_ = 0;
         }
 
         void bind_signature_context(
@@ -224,6 +241,45 @@ namespace lithe::codegen::backends {
             }
             else {
                 bind_signature_context(signature_hint, fn.frame_layout);
+            }
+
+            // Pre-size register file and spill storage from the MIR's declared operands.
+            // This eliminates auto-grow branches on every preg write in exec_fast.
+            // The scan is fused: one pass over instructions covers preg ids and spill ids.
+            {
+                std::uint32_t max_preg = 0;
+                std::uint32_t max_spill = 0;
+                for (const auto& blk : fn.function.blocks) {
+                    for (const auto& inst : blk.instructions) {
+                        for (const auto& d : inst.defs) {
+                            if (d.type == allocated_operand::kind::preg) {
+                                if (const auto* p = std::get_if<preg>(&d.value))
+                                    if (p->id > max_preg) max_preg = p->id;
+                            }
+                            else if (d.type == allocated_operand::kind::spill) {
+                                if (const auto* s = std::get_if<spill_slot>(&d.value))
+                                    if (s->id > max_spill) max_spill = s->id;
+                            }
+                        }
+                        for (const auto& u : inst.uses) {
+                            if (u.type == allocated_operand::kind::preg) {
+                                if (const auto* p = std::get_if<preg>(&u.value))
+                                    if (p->id > max_preg) max_preg = p->id;
+                            }
+                            else if (u.type == allocated_operand::kind::spill) {
+                                if (const auto* s = std::get_if<spill_slot>(&u.value))
+                                    if (s->id > max_spill) max_spill = s->id;
+                            }
+                        }
+                    }
+                }
+                if (max_preg > 0) {
+                    integer_registers.resize(max_preg + 1);
+                    fp_registers.resize(max_preg + 1);
+                }
+                if (max_spill > 0) {
+                    spill_flat.assign(max_spill + 1, std::int64_t{0});
+                }
             }
 
             return out;
@@ -355,6 +411,8 @@ namespace lithe::codegen::backends {
         read_memory(const allocated_operand& op) {
             if (op.type == allocated_operand::kind::spill) {
                 const auto slot = std::get_if<spill_slot>(&op.value)->id;
+                // Fast path: use flat array when pre-sized (avoids hash lookup).
+                if (slot < spill_flat.size()) return spill_flat[slot];
                 if (const auto it = spill_values.find(slot); it != spill_values.end()) {
                     return it->second;
                 }
@@ -374,6 +432,8 @@ namespace lithe::codegen::backends {
         write_memory(const allocated_operand& op, const std::int64_t value) {
             if (op.type == allocated_operand::kind::spill) {
                 const auto slot = std::get_if<spill_slot>(&op.value)->id;
+                // Fast path: use flat array when pre-sized.
+                if (slot < spill_flat.size()) { spill_flat[slot] = value; return true; }
                 spill_values[slot] = value;
                 return true;
             }
@@ -446,6 +506,45 @@ namespace lithe::codegen::backends {
             const auto reg = std::get_if<preg>(&op.value)->id;
             fp_registers[reg] = value;
             return true;
+        }
+
+        // Hot-path operand read: returns value directly, sets ok=false on failure.
+        // Avoids std::optional construction/check on the 99% success path.
+        // Used by exec_fast for binary-op and unary-op inner loops.
+        [[nodiscard]] std::int64_t
+        read_i64_fast(const allocated_operand& op, bool& ok) noexcept {
+            switch (op.type) {
+            case allocated_operand::kind::preg: {
+                const auto reg = std::get_if<preg>(&op.value)->id;
+                return (reg < integer_registers.size()) ? integer_registers[reg]
+                                                        : std::int64_t{0};
+            }
+            case allocated_operand::kind::immediate_i64:
+                return *std::get_if<std::int64_t>(&op.value);
+            case allocated_operand::kind::argument_index: {
+                const auto idx = *std::get_if<std::uint32_t>(&op.value);
+                if (idx < cached_argument_present.size() && cached_argument_present[idx] != 0)
+                    return cached_argument_values[idx];
+                const auto v = read_argument_value(idx);
+                if (!v.has_value()) { ok = false; return std::int64_t{0}; }
+                return *v;
+            }
+            case allocated_operand::kind::spill: {
+                const auto slot = std::get_if<spill_slot>(&op.value)->id;
+                if (slot < spill_flat.size()) return spill_flat[slot];
+                if (const auto it = spill_values.find(slot); it != spill_values.end())
+                    return it->second;
+                return std::int64_t{0};
+            }
+            case allocated_operand::kind::memory: {
+                const auto v = read_memory(op);
+                if (!v.has_value()) { ok = false; return std::int64_t{0}; }
+                return *v;
+            }
+            default:
+                ok = false;
+                return std::int64_t{0};
+            }
         }
 
         // exec_fast — hot-path instruction dispatch.
@@ -592,12 +691,11 @@ namespace lithe::codegen::backends {
                     err_msg = "binary op requires one def and two uses";
                     return false;
                 }
-                const auto lhs = read_i64(inst.uses[0]);
-                const auto rhs = read_i64(inst.uses[1]);
-                if (!lhs.has_value() || !rhs.has_value()) {
-                    err_msg = "binary op input read failed";
-                    return false;
-                }
+                bool ok = true;
+                const auto lhs_v = read_i64_fast(inst.uses[0], ok);
+                if (!ok) { err_msg = "binary op input read failed"; return false; }
+                const auto rhs_v = read_i64_fast(inst.uses[1], ok);
+                if (!ok) { err_msg = "binary op input read failed"; return false; }
                 std::int64_t result = 0;
                 switch (inst.op) {
                 // MIR integer semantics: wrapping two's-complement.
@@ -606,69 +704,50 @@ namespace lithe::codegen::backends {
                 // shl/shr: shift count masked & 63; shl on unsigned bit-pattern,
                 //          shr is arithmetic (sign-preserving).
                 case opcode::add: result = static_cast<std::int64_t>(
-                        static_cast<std::uint64_t>(*lhs) + static_cast<std::uint64_t>(*rhs));
+                        static_cast<std::uint64_t>(lhs_v) + static_cast<std::uint64_t>(rhs_v));
                     break;
                 case opcode::sub: result = static_cast<std::int64_t>(
-                        static_cast<std::uint64_t>(*lhs) - static_cast<std::uint64_t>(*rhs));
+                        static_cast<std::uint64_t>(lhs_v) - static_cast<std::uint64_t>(rhs_v));
                     break;
                 case opcode::mul: result = static_cast<std::int64_t>(
-                        static_cast<std::uint64_t>(*lhs) * static_cast<std::uint64_t>(*rhs));
+                        static_cast<std::uint64_t>(lhs_v) * static_cast<std::uint64_t>(rhs_v));
                     break;
                 case opcode::div: {
-                    if (*rhs == 0) {
-                        result = 0;
-                        break;
+                    if (rhs_v == 0) { result = 0; break; }
+                    if (lhs_v == std::numeric_limits<std::int64_t>::min() && rhs_v == -1) {
+                        result = std::numeric_limits<std::int64_t>::min(); break;
                     }
-                    if (*lhs == std::numeric_limits<std::int64_t>::min() && *rhs == -1) {
-                        result = std::numeric_limits<std::int64_t>::min();
-                        break;
-                    }
-                    result = *lhs / *rhs;
+                    result = lhs_v / rhs_v;
                     break;
                 }
                 case opcode::mod: {
-                    if (*rhs == 0) {
-                        result = 0;
-                        break;
+                    if (rhs_v == 0) { result = 0; break; }
+                    if (lhs_v == std::numeric_limits<std::int64_t>::min() && rhs_v == -1) {
+                        result = 0; break;
                     }
-                    if (*lhs == std::numeric_limits<std::int64_t>::min() && *rhs == -1) {
-                        result = 0;
-                        break;
-                    }
-                    result = *lhs % *rhs;
+                    result = lhs_v % rhs_v;
                     break;
                 }
-                case opcode::bit_and: result = *lhs & *rhs;
-                    break;
-                case opcode::bit_or: result = *lhs | *rhs;
-                    break;
-                case opcode::bit_xor: result = *lhs ^ *rhs;
-                    break;
+                case opcode::bit_and: result = lhs_v & rhs_v; break;
+                case opcode::bit_or:  result = lhs_v | rhs_v; break;
+                case opcode::bit_xor: result = lhs_v ^ rhs_v; break;
                 // shl: shift count masked & 63 on unsigned bit-pattern.
                 // shr: ARITHMETIC (sign-preserving) right shift — matches asmjit
                 //   (asr/sar) so signed operands agree across interpreter and JIT.
                 case opcode::shl: result = static_cast<std::int64_t>(
-                        static_cast<std::uint64_t>(*lhs) << (static_cast<std::uint64_t>(*rhs) & 63u));
+                        static_cast<std::uint64_t>(lhs_v) << (static_cast<std::uint64_t>(rhs_v) & 63u));
                     break;
-                case opcode::shr: result = *lhs >> static_cast<int>(
-                        static_cast<std::uint64_t>(*rhs) & 63u);
+                case opcode::shr: result = lhs_v >> static_cast<int>(
+                        static_cast<std::uint64_t>(rhs_v) & 63u);
                     break;
-                case opcode::logical_and: result = (*lhs != 0 && *rhs != 0) ? 1 : 0;
-                    break;
-                case opcode::logical_or: result = (*lhs != 0 || *rhs != 0) ? 1 : 0;
-                    break;
-                case opcode::cmp_eq: result = (*lhs == *rhs) ? 1 : 0;
-                    break;
-                case opcode::cmp_ne: result = (*lhs != *rhs) ? 1 : 0;
-                    break;
-                case opcode::cmp_lt: result = (*lhs < *rhs) ? 1 : 0;
-                    break;
-                case opcode::cmp_le: result = (*lhs <= *rhs) ? 1 : 0;
-                    break;
-                case opcode::cmp_gt: result = (*lhs > *rhs) ? 1 : 0;
-                    break;
-                case opcode::cmp_ge: result = (*lhs >= *rhs) ? 1 : 0;
-                    break;
+                case opcode::logical_and: result = (lhs_v != 0 && rhs_v != 0) ? 1 : 0; break;
+                case opcode::logical_or:  result = (lhs_v != 0 || rhs_v != 0) ? 1 : 0; break;
+                case opcode::cmp_eq: result = (lhs_v == rhs_v) ? 1 : 0; break;
+                case opcode::cmp_ne: result = (lhs_v != rhs_v) ? 1 : 0; break;
+                case opcode::cmp_lt: result = (lhs_v <  rhs_v) ? 1 : 0; break;
+                case opcode::cmp_le: result = (lhs_v <= rhs_v) ? 1 : 0; break;
+                case opcode::cmp_gt: result = (lhs_v >  rhs_v) ? 1 : 0; break;
+                case opcode::cmp_ge: result = (lhs_v >= rhs_v) ? 1 : 0; break;
                 default: break;
                 }
                 if (!write_preg(inst.defs.front(), result)) {
@@ -684,21 +763,17 @@ namespace lithe::codegen::backends {
                     err_msg = "unary op requires one def and one use";
                     return false;
                 }
-                const auto value = read_i64(inst.uses.front());
-                if (!value.has_value()) {
-                    err_msg = "unary op input read failed";
-                    return false;
-                }
-                std::int64_t result = *value;
+                bool ok = true;
+                const auto value_v = read_i64_fast(inst.uses.front(), ok);
+                if (!ok) { err_msg = "unary op input read failed"; return false; }
+                std::int64_t result = value_v;
                 switch (inst.op) {
                 // Two's-complement negation via unsigned arithmetic — avoids signed
-                // overflow UB when *value == INT64_MIN.
-                case opcode::neg: result = static_cast<std::int64_t>(~static_cast<std::uint64_t>(*value) + 1u);
+                // overflow UB when value_v == INT64_MIN.
+                case opcode::neg: result = static_cast<std::int64_t>(~static_cast<std::uint64_t>(value_v) + 1u);
                     break;
-                case opcode::bit_not: result = ~*value;
-                    break;
-                case opcode::logical_not: result = (*value == 0) ? 1 : 0;
-                    break;
+                case opcode::bit_not: result = ~value_v; break;
+                case opcode::logical_not: result = (value_v == 0) ? 1 : 0; break;
                 default: break;
                 }
                 if (!write_preg(inst.defs.front(), result)) {
@@ -1149,19 +1224,23 @@ namespace lithe::codegen::backends {
             // is byte-for-byte preserved.
             const auto& blocks = fn.function.blocks;
 
-            // Flat block_index vector: index == block id, value == position in
-            // blocks[]. Block ids from coordinate_lowering_pass are dense 1-based
-            // integers so a flat vector beats unordered_map by ~5x on branch lookups.
-            // Sentinel value blocks.size() marks "not found".
-            const std::size_t sentinel = blocks.size();
-            std::uint32_t max_block_id = 0;
-            for (const auto& b : blocks) {
-                if (b.id > max_block_id) max_block_id = b.id;
+            // Structural block-index cache: rebuilt only when the physical MIR
+            // pointer changes (structure is immutable once lowered). This avoids
+            // O(blocks) allocation + fill on every interpretation call for the
+            // same function (e.g. REPL, benchmark loops, tiered-compile Tier 1).
+            if (cached_fn_ptr_ != static_cast<const void*>(&fn)) {
+                cached_fn_ptr_ = static_cast<const void*>(&fn);
+                cached_block_sentinel_ = blocks.size();
+                std::uint32_t max_block_id = 0;
+                for (const auto& b : blocks)
+                    if (b.id > max_block_id) max_block_id = b.id;
+                cached_block_index_.assign(static_cast<std::size_t>(max_block_id) + 1,
+                                           cached_block_sentinel_);
+                for (std::size_t i = 0; i < blocks.size(); ++i)
+                    cached_block_index_[blocks[i].id] = i;
             }
-            std::vector<std::size_t> block_index(static_cast<std::size_t>(max_block_id) + 1, sentinel);
-            for (std::size_t i = 0; i < blocks.size(); ++i) {
-                block_index[blocks[i].id] = i;
-            }
+            const std::size_t sentinel = cached_block_sentinel_;
+            const auto& block_index   = cached_block_index_;
 
             auto find_block = [&](std::uint32_t id) -> std::size_t {
                 if (id < block_index.size()) return block_index[id];
@@ -1503,6 +1582,7 @@ namespace lithe::codegen {
         // threshold — if so, skip Tier 1 interpretation and re-emit.
         // ----------------------------------------------------------------
         const auto already_hot = [&]() -> bool {
+            if (ctx.profiling.tier2_fired) return true;
             if (ctx.profiling.counters.empty()) return false;
             for (const auto& c : ctx.profiling.counters) {
                 if (c.execution_count < ctx.profiling.hot_threshold) return false;
@@ -1538,6 +1618,7 @@ namespace lithe::codegen {
         // Tier 2: apply aggressive MIR optimizations, then emit via target.
         // ----------------------------------------------------------------
         out.tier_reached = 2;
+        ctx.profiling.tier2_fired = true;
 
         // Build the Tier 2 pass pipeline (caller override or default aggressive).
         // The pipeline is run on the full function: extracting only the hot
@@ -1613,6 +1694,7 @@ namespace lithe::codegen {
 #endif
 
         const auto already_hot = [&]() -> bool {
+            if (ctx.profiling.tier2_fired) return true;
             if (ctx.profiling.counters.empty()) return false;
             for (const auto& c : ctx.profiling.counters) {
                 if (c.execution_count < ctx.profiling.hot_threshold) return false;
@@ -1634,6 +1716,7 @@ namespace lithe::codegen {
         }
 
         out.tier_reached = 2;
+        ctx.profiling.tier2_fired = true;
 
         if (tier2_passes.has_value()) {
             // Caller-supplied pipeline overrides the advisor.
