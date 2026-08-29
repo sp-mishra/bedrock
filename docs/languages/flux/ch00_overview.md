@@ -149,6 +149,40 @@ This lets you test parsing and semantics without touching Lithe.
 
 ---
 
+## See It in Action
+
+Professional language architecture example: [`src/examples/languages/flux/flux_compiler_architecture.hpp`](../../../src/examples/languages/flux/flux_compiler_architecture.hpp)
+
+Demonstrates:
+- **Three-path frontend**: lexy (runtime) vs Samasa (consteval) vs EDSL (C++ direct)
+- **Three-path invariant**: all paths produce identical `vakya::node` tree
+- **Unified pipeline**: shared type system, shape inference, cost modeling
+- **Intelligent execution**: cost-driven backend selection (CPU vs GPU)
+
+Compile & run:
+```bash
+g++ -std=c++23 -DFLUX_EXAMPLE_MAIN src/examples/languages/flux/flux_compiler_architecture.hpp -o flux_demo
+./flux_demo
+```
+
+---
+
+## Examples & Code References
+
+| Example | Topic | Headers | File |
+|---------|-------|---------|------|
+| **Three-Path Frontend** | Lexy, Samasa, EDSL convergence | `lithe/lithe.hpp` | [`example_three_path_frontend.hpp`](../../../src/examples/languages/flux/example_three_path_frontend.hpp) |
+| **Type Inference Pipeline** | HM Algorithm W, shape inference | `lithe/lithe.hpp`, `vakya/vakya_types.hpp` | [`example_type_inference_pipeline.hpp`](../../../src/examples/languages/flux/example_type_inference_pipeline.hpp) |
+| **Cost & Backend Selection** | Decision engine, CPU vs GPU | `lithe/lithe_cost_model.hpp`, `lithe/lithe_execution_admission.hpp` | [`example_cost_backend_selection.hpp`](../../../src/examples/languages/flux/example_cost_backend_selection.hpp) |
+| **GPU Execution** | Metal/Vulkan, MSL/SPIR-V codegen | `lithe_codegen_metal.hpp`, `lithe_codegen_vulkan_spirv_ir.hpp` | [`example_gpu_execution.hpp`](../../../src/examples/languages/flux/example_gpu_execution.hpp) |
+
+Each example is self-contained and shows real Lithe API usage. Compile with:
+```bash
+g++ -std=c++23 -I include src/examples/languages/flux/example_*.hpp
+```
+
+---
+
 ## Namespace Map
 
 | Namespace | Source |
@@ -177,6 +211,10 @@ This lets you test parsing and semantics without touching Lithe.
 | [08](ch08_rewrites.md) | Rewrites & E-Graphs | Pattern DSL, equality saturation |
 | [09](ch09_ir.md) | IR & Backends | Lithe MIR, CPU/SIMD/GPU codegen |
 | [10](ch10_execution.md) | Execution | run(), show_vakya(), benchmark() |
+| [11](ch11_validation.md) | Validation | Three-path invariant, test suite |
+| [12](ch12_cost_modeling.md) | Cost Modeling | Cost vectors, decision engine, backend selection |
+| [13](ch13_gpu_execution.md) | GPU Execution | Metal/Vulkan, execution graphs, MSL/SPIR-V codegen |
+| [14](ch14_observability.md) | Observability | Phase events, flame graphs, NADI telemetry |
 | [11](ch11_validation.md) | Backend Validation | verify_backends(), cross-backend correctness |
 | [12](ch_ffi.md) | FFI: C++ ↔ Flux | extern fn, tag-based FFI, tensor marshalling |
 | [13](ch_debug_repl.md) | Debugging & REPL | Diagnostics, introspection, interactive REPL |

@@ -92,7 +92,6 @@
 #include "test/example_registry.hpp"
 #include "utils/log.hpp"
 #include "languages/crank/frontend.hpp"
-#include "languages/crank/ast_tags.hpp"
 #include "languages/crank/host.hpp"
 #include "languages/crank/context.hpp"
 #include "languages/crank/lower_hl.hpp"
@@ -114,7 +113,6 @@
 #include "languages/crank/diagnostic.hpp"
 #include "languages/crank/resolve.hpp"
 #include "lithe/backends/lithe_codegen_simd.hpp"
-#include "vakya/vakya.hpp"
 #include "observability/sinks/ring_buffer_sink.hpp"
 #include "utils/profiler.hpp"
 
