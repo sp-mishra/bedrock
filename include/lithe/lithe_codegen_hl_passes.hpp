@@ -949,10 +949,9 @@ namespace lithe::codegen::hl {
 
             std::uint32_t next_block_id = 1;
             std::uint32_t next_instr_id = 1;
-            // Physical register ids are dense and zero-based.  Several backend
-            // allocation/ABI tables size storage by the number of registers, so
-            // starting at one makes the highest id fall one past that storage.
-            std::uint32_t next_preg_id = 0;
+            // Physical register ids start at 1; id 0 is the invalid sentinel used
+            // by the interpreter's resize guard (max_preg > 0) and ABI tables.
+            std::uint32_t next_preg_id = 1;
             std::uint32_t next_argument_index = 0;
 
             // Map ssa_value_id → flat preg for scalar values.
