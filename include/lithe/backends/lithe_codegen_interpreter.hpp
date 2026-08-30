@@ -115,6 +115,56 @@ namespace lithe::codegen::backends {
             return std::nullopt;
         }
 
+        [[nodiscard]] static std::optional<std::string>
+        preflight_operand_diagnostic(const mir::physical_mir_function& fn) {
+            const auto min_operands = [](const opcode op) noexcept -> std::pair<std::uint8_t, std::uint8_t> {
+                switch (op) {
+                case opcode::nop: return {0, 0};
+                case opcode::ret: return {0, 0};
+                case opcode::branch: return {0, 1};
+                case opcode::branch_cond: return {0, 3};
+                case opcode::load_arg:
+                case opcode::load_imm:
+                case opcode::mov:
+                case opcode::load_spill:
+                case opcode::load:
+                case opcode::store_spill:
+                case opcode::store:
+                case opcode::fneg:
+                case opcode::fload_imm:
+                case opcode::fload:
+                case opcode::fstore:
+                case opcode::gpr_to_fp:
+                case opcode::fp_to_gpr:
+                case opcode::neg:
+                case opcode::bit_not:
+                case opcode::logical_not:
+                    return {1, 1};
+                case opcode::add: case opcode::sub: case opcode::mul: case opcode::div:
+                case opcode::mod: case opcode::bit_and: case opcode::bit_or: case opcode::bit_xor:
+                case opcode::shl: case opcode::shr: case opcode::logical_and: case opcode::logical_or:
+                case opcode::cmp_eq: case opcode::cmp_ne: case opcode::cmp_lt: case opcode::cmp_le:
+                case opcode::cmp_gt: case opcode::cmp_ge:
+                case opcode::fadd: case opcode::fsub: case opcode::fmul: case opcode::fdiv:
+                case opcode::fcmp_eq: case opcode::fcmp_ne: case opcode::fcmp_lt:
+                case opcode::fcmp_le: case opcode::fcmp_gt: case opcode::fcmp_ge:
+                    return {1, 2};
+                default: return {0, 0};
+                }
+            };
+
+            for (const auto& block : fn.function.blocks) {
+                for (const auto& inst : block.instructions) {
+                    const auto [min_defs, min_uses] = min_operands(inst.op);
+                    if (inst.defs.size() < min_defs || inst.uses.size() < min_uses) {
+                        return "interpreter preflight: bad operand count at i"
+                            + std::to_string(inst.id);
+                    }
+                }
+            }
+            return std::nullopt;
+        }
+
         std::vector<std::int64_t> arguments;
         // Flat register file: index == preg.id. Grown on first write, zeroed on reset.
         // preg ids from coordinate_lowering_pass are dense 1-based integers so direct
@@ -139,6 +189,7 @@ namespace lithe::codegen::backends {
         bool debug_dump_frame_layout = false;
         std::optional<std::int64_t> return_value;
         bool halted = false;
+        bool operands_preflight_trusted_ = false;
 
         // Structural cache — rebuilt only when the physical MIR pointer changes.
         // Holds the block id→index map so emit_impl does not rebuild it each call.
@@ -171,6 +222,7 @@ namespace lithe::codegen::backends {
             active_return_location = std::nullopt;
             return_value = std::nullopt;
             halted = false;
+            operands_preflight_trusted_ = false;
             // Note: cached_fn_ptr_ / cached_block_index_ are structural (immutable
             // once lowered) and are NOT reset here.
         }
@@ -230,6 +282,10 @@ namespace lithe::codegen::backends {
             if (const auto unsupported = unsupported_opcode_diagnostic(fn); unsupported.has_value()) {
                 return backend_result::fail(*unsupported, std::move(state));
             }
+            if (const auto malformed = preflight_operand_diagnostic(fn); malformed.has_value()) {
+                return backend_result::fail(*malformed, std::move(state));
+            }
+            operands_preflight_trusted_ = fn.verified;
 
             auto out = begin_function(fn.function, std::move(state));
             if (!out.ok()) {
@@ -461,6 +517,7 @@ namespace lithe::codegen::backends {
             }
             case allocated_operand::kind::spill: {
                 const auto slot = std::get_if<spill_slot>(&op.value)->id;
+                if (slot < spill_flat.size()) return spill_flat[slot];
                 if (const auto it = spill_values.find(slot); it != spill_values.end()) {
                     return it->second;
                 }
@@ -592,12 +649,13 @@ namespace lithe::codegen::backends {
             }
             case opcode::load_imm:
             case opcode::mov: {
-                if (inst.defs.empty() || inst.uses.empty()) {
+                if (!operands_preflight_trusted_ && (inst.defs.empty() || inst.uses.empty())) {
                     err_msg = "mov/load_imm requires one def and one use";
                     return false;
                 }
-                const auto value = read_i64(inst.uses.front());
-                if (!value.has_value() || !write_preg(inst.defs.front(), *value)) {
+                bool ok = true;
+                const auto value = read_i64_fast(inst.uses.front(), ok);
+                if (!ok || !write_preg(inst.defs.front(), value)) {
                     err_msg = "mov/load_imm failed";
                     return false;
                 }
@@ -1037,13 +1095,14 @@ namespace lithe::codegen::backends {
                     err_msg = "branch_cond targets must be block operands";
                     return false;
                 }
-                const auto cond = read_i64(inst.uses[0]);
-                if (!cond.has_value()) {
+                bool ok = true;
+                const auto cond = read_i64_fast(inst.uses[0], ok);
+                if (!ok) {
                     err_msg = "branch_cond condition read failed";
                     return false;
                 }
                 action.k = dispatch_action::kind::jump;
-                action.target = (*cond != 0)
+                action.target = (cond != 0)
                                     ? *std::get_if<std::uint32_t>(&inst.uses[1].value)
                                     : *std::get_if<std::uint32_t>(&inst.uses[2].value);
                 return true;

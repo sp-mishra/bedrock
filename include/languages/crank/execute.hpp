@@ -651,7 +651,8 @@ namespace crank {
     execute_physical(const lithe::codegen::mir::physical_mir_function& phys,
                      const std::vector<std::int64_t>& args,
                      execute_options opts) {
-        if (detail::should_use_native(phys, opts)) {
+        const auto ms = detail::compute_mir_stats(phys);
+        if (detail::should_use_native(ms, opts)) {
             return execute_physical_native(phys, args, opts);
         }
         return detail::run_interpreter(phys, args, opts);
@@ -800,7 +801,7 @@ namespace crank {
         res.stats.execute_ns = static_cast<std::int64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(t3 - t2).count()
         );
-        res.stats.instr_count = detail::count_instrs(phys_fn);
+        res.stats.instr_count = phys_ms.instr_count;
 
         // Check if fallback was used (fallback fires emit a diagnostic with stage tag).
         // Route interpreter CFG-limit messages to notes — they are non-fatal.

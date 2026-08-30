@@ -213,3 +213,34 @@ TEST_CASE (
         CHECK(r == i + i * 2);
     }
 }
+
+TEST_CASE(
+    "interpreter preflight: rejects malformed operand counts",
+    "[interpreter][vertical][preflight]") {
+    using namespace cg;
+    allocated_function_ir fn;
+    fn.name = "bad_operands";
+    fn.cfg.entry_block = 1;
+
+    allocated_basic_block bb;
+    bb.id = 1;
+    allocated_instruction add;
+    add.id = 1;
+    add.op = opcode::add;
+    add.defs = {allocated_operand::as_preg({1, "r1"})};
+    add.uses = {allocated_operand::as_preg({0, "r0"})}; // missing rhs operand
+    bb.instructions.push_back(add);
+    fn.blocks.push_back(std::move(bb));
+
+    mir::physical_mir_function phys;
+    phys.function = std::move(fn);
+    phys.verified = true; // bypass verifier to assert interpreter preflight path
+
+    cg::backends::interpreter_backend backend;
+    const auto art = backend.emit(phys);
+    // compilation_artifact::ok() reports artifact presence (kind != none),
+    // so execution/preflight failures must be asserted through diagnostics.
+    REQUIRE_FALSE(art.diagnostics.empty());
+    CHECK(art.diagnostics.front().find("bad operand count") != std::string::npos);
+}
+

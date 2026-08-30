@@ -712,3 +712,28 @@ TEST_CASE (
     }
 }
 
+TEST_CASE(
+    "native exec: stats-based routing matches execution path policy",
+    "[crank][native][policy]") {
+    crank::execute_options auto_opts;
+    auto_opts.path = crank::execute_options::execution_path::auto_select;
+
+    crank::detail::mir_stats tiny{
+        .instr_count = 2,
+        .branch_count = 0,
+        .block_count = 1,
+    };
+    CHECK_FALSE(crank::detail::should_use_native(tiny, auto_opts));
+
+    crank::detail::mir_stats cfg_like{
+        .instr_count = 8,
+        .branch_count = 1,
+        .block_count = 5,
+    };
+    CHECK(crank::detail::should_use_native(cfg_like, auto_opts));
+
+    crank::execute_options force_interp;
+    force_interp.path = crank::execute_options::execution_path::interpreter_only;
+    CHECK_FALSE(crank::detail::should_use_native(cfg_like, force_interp));
+}
+
