@@ -674,7 +674,7 @@ when their dependency is present (see guards below).
 | `std.collections` | `install_std_collections`     | `vector`/`unordered_map`/`unordered_set` | pure     | `VecLen`, `MapGet`, `SetContains`                   |
 | `std.containers`  | `install_std_containers`      | `containers::union_find` + STL `vector` | pure      | `ConnectedComponents`, `TopoOrder`, `BfsOrder`, `VecIntSort` |
 | `std.time`        | `install_std_time`            | `<chrono>`/`<thread>`  | thread-safe; `SleepMillis` blocking | `NowNanos`, `SleepMillis`                  |
-| `std.io`          | `install_std_io`              | `<print>`              | IO · Write · blocking      | `Print`, `Println`, `EPrintln`                      |
+| `std.io`          | `install_std_io`              | `<print>` + `stdin`    | IO · Read/Write · blocking | `Print`, `Println`, `EPrintln`, `ReadLine`, `ReadAllStdin` |
 | `std.fs`          | `install_std_fs`              | `std::filesystem`      | FileSystem · Read/Write · blocking | `ReadFile`, `WriteFile`, `Exists`, `Remove` |
 | `std.process`     | `install_std_process`         | `std::getenv` + libuv  | IO · Read/Execute          | `Env`, `HasEnv`, `SpawnWait`†                       |
 | `std.net`         | `install_std_net`             | libuv (`uv_tcp`/`uv_udp`) | Network · Network       | `ConnectTcp`, `ListenTcp`, `BindUdp`†               |

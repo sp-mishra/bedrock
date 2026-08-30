@@ -508,3 +508,45 @@ TEST_CASE("std: install_std_all resolves a containers symbol", "[crank][std][con
     CHECK(crank::verify_extern_fn_decl(e.context(), "TopoOrder",
                                        "std.containers.topo_order", 3).has_value());
 }
+
+// ============================================================================
+// Test 20 — io input symbols resolve with expected arity
+// ============================================================================
+
+TEST_CASE("std: io input symbols resolve", "[crank][std][io]") {
+    crank::engine e;
+    crank::stdlib::install_std_io(e.context());
+
+    auto rline = crank::verify_extern_fn_decl(e.context(), "ReadLine", "std.io.read_line", 0);
+    auto rall = crank::verify_extern_fn_decl(e.context(), "ReadAllStdin", "std.io.read_all_stdin", 0);
+    REQUIRE(rline.has_value());
+    REQUIRE(rall.has_value());
+    CHECK(rline->arity == 0u);
+    CHECK(rall->arity == 0u);
+    CHECK(rline->thunk != nullptr);
+    CHECK(rall->thunk != nullptr);
+}
+
+// ============================================================================
+// Test 21 — io input descriptors carry IO+Read and blocking metadata
+// ============================================================================
+
+TEST_CASE("std: io input metadata", "[crank][std][io]") {
+    crank::engine e;
+    crank::stdlib::install_std_io(e.context());
+
+    auto rline = crank::verify_extern_fn_decl(e.context(), "ReadLine", "std.io.read_line", 0);
+    auto rall = crank::verify_extern_fn_decl(e.context(), "ReadAllStdin", "std.io.read_all_stdin", 0);
+    REQUIRE(rline.has_value());
+    REQUIRE(rall.has_value());
+
+    const auto& d1 = *rline->descriptor;
+    const auto& d2 = *rall->descriptor;
+    CHECK((d1.effects & vakya::types::kEffectMaskIO) != 0);
+    CHECK((d2.effects & vakya::types::kEffectMaskIO) != 0);
+    CHECK((d1.capabilities & vakya::types::kCapMaskRead) != 0);
+    CHECK((d2.capabilities & vakya::types::kCapMaskRead) != 0);
+    CHECK(d1.blocking == crank::blocking_class::potentially_blocking);
+    CHECK(d2.blocking == crank::blocking_class::potentially_blocking);
+}
+

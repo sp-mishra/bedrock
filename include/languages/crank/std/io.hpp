@@ -12,7 +12,9 @@
 #include "languages/crank/effects.hpp"
 
 #include <cstdint>
+#include <iostream>
 #include <print>
+#include <sstream>
 #include <string>
 
 namespace crank::stdlib {
@@ -43,6 +45,21 @@ namespace crank::stdlib {
             std::println("{}", v);
             return 0;
         }
+
+        // read_line — reads one line from stdin; returns empty string on EOF/error.
+        [[nodiscard]] inline std::string read_line() {
+            std::string line;
+            if (!std::getline(std::cin, line)) return {};
+            return line;
+        }
+
+        // read_all_stdin — drains stdin into one string; empty string on EOF/error.
+        [[nodiscard]] inline std::string read_all_stdin() {
+            std::ostringstream out;
+            out << std::cin.rdbuf();
+            if (!std::cin.good() && !std::cin.eof()) return {};
+            return out.str();
+        }
     } // namespace io_fns
 
     inline void install_std_io(crank::context& ctx) {
@@ -55,6 +72,13 @@ namespace crank::stdlib {
                      static_cast<function_flags>(function_flag::thread_safe),
             .blocking = blocking_class::potentially_blocking,
         };
+        const function_options r{
+            .effects = vakya::types::kEffectMaskIO,
+            .capabilities = vakya::types::kCapMaskRead,
+            .flags = static_cast<function_flags>(function_flag::blocking) |
+                     static_cast<function_flags>(function_flag::thread_safe),
+            .blocking = blocking_class::potentially_blocking,
+        };
 
         detail::add_fn<"std.io.print", &io::print_str>(mod, ctx, "Print", w);
         detail::add_fn<"std.io.println", &io::println_str>(mod, ctx, "Println", w);
@@ -62,6 +86,8 @@ namespace crank::stdlib {
         detail::add_fn<"std.io.println_i64", &io::println_i64>(mod, ctx, "PrintlnInt", w);
         detail::add_fn<"std.io.println_f64", &io::println_f64>(mod, ctx, "PrintlnFloat", w);
         detail::add_fn<"std.io.println_bool", &io::println_bool>(mod, ctx, "PrintlnBool", w);
+        detail::add_fn<"std.io.read_line", &io::read_line>(mod, ctx, "ReadLine", r);
+        detail::add_fn<"std.io.read_all_stdin", &io::read_all_stdin>(mod, ctx, "ReadAllStdin", r);
 
         ctx.register_ffi_module(mod.build());
     }
