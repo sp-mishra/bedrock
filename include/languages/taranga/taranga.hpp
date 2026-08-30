@@ -28,4 +28,5 @@
 #include "languages/taranga/opcode_map.hpp"
 #include "languages/taranga/runtime_prelude.hpp"
 #include "languages/taranga/ssa_build.hpp"
+#include "languages/taranga/std/std.hpp"
 #include "languages/taranga/validate.hpp"

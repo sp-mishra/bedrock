@@ -111,6 +111,12 @@ if (eng.has_value()) {
 | `runtime_prelude.hpp` | Host intrinsics for conversions, bit-counts, truncation |
 | `lower_hl.hpp` | 4-phase SSA → Lithe HL MIR lowering + freeze + verify_portable |
 | `engine.hpp` | Interpreter engine: `create()` / `invoke()` |
+| `std/detail/register.hpp` | Lightweight stdlib function registry for host projections |
+| `std/core.hpp` | `std.core` installs scalar helpers (`IdentityI64`, `ClampI64`) |
+| `std/math.hpp` | `std.math` installs integer arithmetic helpers |
+| `std/time.hpp` | `std.time` installs monotonic time helper (`NowNs`) |
+| `std/io.hpp` | `std.io` installs console helper (`PrintlnI64`) |
+| `std/std.hpp` | stdlib umbrella: `install_std_all(registry&)` |
 | `taranga.hpp` | Umbrella include |
 
 ---
