@@ -1799,6 +1799,11 @@ compile-time template switch: `Observe=false` emits nothing and stores nothing;
 compatible observer. Provider discovery, device handles, and benchmark storage
 remain outside the portable core.
 
+Selection results now expose explicit `selected_reason` and `fallback_reason`
+strings, and `execution_selection_event` carries both fields. This keeps static
+Nadi decision telemetry reason-coded without introducing backend headers or
+runtime type erasure into selector code.
+
 `lithe_execution_benchmark.hpp` is an opt-in fixture for equivalent provider
 workloads. `measure_provider` records cold compilation separately from warmed
 execution samples and stops on the first failed equivalence predicate. It does
@@ -1809,6 +1814,10 @@ adaptive cost model without making benchmark collection part of compilation.
 `calibrate_candidate_cost` is the complementary pure adapter: it returns an
 explicit warm-cache candidate cost from an equivalent benchmark measurement,
 leaving feedback storage and automatic selection under the caller's control.
+
+The benchmark record includes an explicit `benchmark_scope` (`full_path` or
+`direct_entry`) and a `phase_timing_record` so compile, install, transfer,
+allocation, and warm execution timings remain independently reportable.
 
 `execution_cost_input` keeps selection deterministic while representing the
 actual workload: work items, data bytes, device-transfer bytes, cache state,
@@ -1823,6 +1832,13 @@ admission updates only the matching candidate. `make_execution_fallback_chain`
 exposes the macOS order Metal, Vulkan, SIMD, JIT, interpreter for a selected
 provider. A caller may set `force_requires_success` when a forced provider must
 report failure rather than use a fallback.
+
+At the execution layer, `lithe::algorithms::backend_capability_info` also
+accepts an optional `admission` value (`provider`, `plan_admitted`,
+`provider_available`, `reason`). When present, the cost-based selector rejects
+that candidate with the same reason code before normal availability/capability
+gates, keeping selector logic backend-neutral while preserving explicit fallback
+diagnostics.
 
 The Highway SIMD backend consumes a proven `vector_plan` through
 `bind_vector_plan`. It accepts only materialized f32 elementwise plans with a

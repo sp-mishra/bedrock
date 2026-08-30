@@ -16,15 +16,31 @@
 #include <vector>
 
 namespace lithe::benchmark {
+    enum class benchmark_scope : std::uint8_t {
+        full_path,
+        direct_entry,
+    };
+
+    struct phase_timing_record {
+        std::uint64_t compile_ns = 0;
+        std::uint64_t install_ns = 0;
+        std::uint64_t transfer_ns = 0;
+        std::uint64_t allocation_ns = 0;
+        std::vector<std::uint64_t> warm_execution_ns;
+    };
+
     struct benchmark_options {
         std::uint32_t warmup_runs = 1;
         std::uint32_t measured_runs = 9;
+        benchmark_scope scope = benchmark_scope::full_path;
     };
 
     struct provider_measurement {
         std::uint64_t cold_compile_ns = 0;
         std::vector<std::uint64_t> warm_execution_ns;
         bool equivalent = false;
+        benchmark_scope scope = benchmark_scope::full_path;
+        phase_timing_record phases{};
 
         [[nodiscard]] std::uint64_t median_warm_execution_ns() const noexcept {
             if (warm_execution_ns.empty()) return 0;
@@ -44,6 +60,8 @@ namespace lithe::benchmark {
         const auto compile_end = std::chrono::steady_clock::now();
         out.cold_compile_ns = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(compile_end - compile_start).count());
+        out.scope = options.scope;
+        out.phases.compile_ns = out.cold_compile_ns;
 
         for (std::uint32_t run = 0; run < options.warmup_runs; ++run)
             static_cast<void>(std::invoke(execute, artifact));
@@ -55,6 +73,7 @@ namespace lithe::benchmark {
             const auto end = std::chrono::steady_clock::now();
             out.warm_execution_ns.push_back(static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()));
+            out.phases.warm_execution_ns = out.warm_execution_ns;
             out.equivalent = std::invoke(equivalent, result);
             if (!out.equivalent) break;
         }

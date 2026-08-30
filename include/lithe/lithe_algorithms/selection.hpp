@@ -36,6 +36,22 @@
 #include "../lithe_diagnostics.hpp"            // diag::diagnostic, severity, stage
 
 namespace lithe::algorithms {
+    namespace detail {
+        [[nodiscard]] constexpr std::string_view admission_reason_code(
+            const execution::backend_admission_reason reason) noexcept {
+            switch (reason) {
+            case execution::backend_admission_reason::admitted: return "admitted";
+            case execution::backend_admission_reason::plan_rejected: return "plan_rejected";
+            case execution::backend_admission_reason::provider_unavailable: return "provider_unavailable";
+            case execution::backend_admission_reason::policy_restricted: return "policy_restricted";
+            case execution::backend_admission_reason::installation_failed: return "installation_failed";
+            case execution::backend_admission_reason::dispatch_failed: return "dispatch_failed";
+            case execution::backend_admission_reason::unknown: return "unknown";
+            }
+            return "unknown";
+        }
+    } // namespace detail
+
     // =========================================================================
     //  algorithm_descriptor — static properties of a selector algorithm
     // =========================================================================
@@ -265,6 +281,7 @@ namespace lithe::algorithms {
         bool security_ok = true; // satisfies security policy
         bool artifact_ok = true; // matches artifact constraints
         bool available = true; // currently accessible
+        std::optional<execution::backend_admission_state> admission; // optional provider adapter view
     };
 
     // negotiation_report_buffer — a short fixed-size buffer for the NADI report.
@@ -409,6 +426,30 @@ namespace lithe::algorithms {
             std::size_t viable_count = 0;
 
             for (const auto& b : backends) {
+                // Optional adapter gate: backend-free selector consumes pure values.
+                if (b.admission.has_value()) {
+                    const auto& a = *b.admission;
+                    if (!a.plan_admitted) {
+                        const auto code = detail::admission_reason_code(a.reason);
+                        report.append("  rejected (");
+                        report.append(code);
+                        report.append("): ");
+                        report.append(b.backend_id);
+                        report.append("\n");
+                        if (explanation) explanation->add_reject(b.backend_id, code);
+                        continue;
+                    }
+                    if (!a.provider_available) {
+                        const auto code = detail::admission_reason_code(a.reason);
+                        report.append("  rejected (");
+                        report.append(code);
+                        report.append("): ");
+                        report.append(b.backend_id);
+                        report.append("\n");
+                        if (explanation) explanation->add_reject(b.backend_id, code);
+                        continue;
+                    }
+                }
                 if (!b.available) {
                     if (explanation) explanation->add_reject(b.backend_id, "unavailable");
                     continue; // step 1

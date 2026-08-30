@@ -10,11 +10,11 @@ namespace {
         execution_selection_inputs inputs;
         inputs.vector_legal = true;
         inputs.candidates = {{
-            {planned_execution_kind::interpreter, true, 0, 10},
-            {planned_execution_kind::jit, true, 0, 5},
-            {planned_execution_kind::simd, true, 0, 1},
-            {planned_execution_kind::metal, true, 0, 1},
-            {planned_execution_kind::vulkan, false, 0, 1},
+            {.kind = planned_execution_kind::interpreter, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 10},
+            {.kind = planned_execution_kind::jit, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 5},
+            {.kind = planned_execution_kind::simd, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
+            {.kind = planned_execution_kind::metal, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
+            {.kind = planned_execution_kind::vulkan, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 1},
         }};
         const execution_backend_admission rejected{
             .kind = planned_execution_kind::simd,
@@ -34,11 +34,11 @@ namespace {
         inputs.vector_legal = true;
         inputs.accelerator_legal = true;
         inputs.candidates = {{
-            {planned_execution_kind::interpreter, true, 0, 1},
-            {planned_execution_kind::jit, true, 0, 1},
-            {planned_execution_kind::simd, true, 0, 1},
-            {planned_execution_kind::metal, true, 0, 1},
-            {planned_execution_kind::vulkan, true, 0, 1},
+            {.kind = planned_execution_kind::interpreter, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
+            {.kind = planned_execution_kind::jit, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
+            {.kind = planned_execution_kind::simd, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
+            {.kind = planned_execution_kind::metal, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
+            {.kind = planned_execution_kind::vulkan, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
         }};
 
         const auto chain = make_execution_fallback_chain(
@@ -55,11 +55,11 @@ namespace {
               "[lithe][execution][admission]") {
         execution_selection_inputs inputs;
         inputs.candidates = {{
-            {planned_execution_kind::interpreter, true, 0, 1},
-            {planned_execution_kind::jit, false, 0, 0},
-            {planned_execution_kind::simd, false, 0, 0},
-            {planned_execution_kind::metal, false, 0, 0},
-            {planned_execution_kind::vulkan, false, 0, 0},
+            {.kind = planned_execution_kind::interpreter, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
+            {.kind = planned_execution_kind::jit, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 0},
+            {.kind = planned_execution_kind::simd, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 0},
+            {.kind = planned_execution_kind::metal, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 0},
+            {.kind = planned_execution_kind::vulkan, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 0},
         }};
         const execution_selection_policy policy{
             .force = planned_execution_kind::metal,
@@ -71,5 +71,45 @@ namespace {
         CHECK(selection.selected == planned_execution_kind::metal);
         CHECK(selection.force_unsatisfied);
         CHECK_FALSE(selection.fell_back);
+    }
+
+    TEST_CASE("execution admission stores reason code on unavailable candidates",
+              "[lithe][execution][admission]") {
+        execution_candidate_cost candidate{
+            .kind = planned_execution_kind::metal,
+            .available = true,
+        };
+        const execution_backend_admission unavailable{
+            .kind = planned_execution_kind::metal,
+            .plan_admitted = true,
+            .provider_available = false,
+            .reason = execution_admission_reason::provider_unavailable,
+        };
+
+        const auto updated = apply_execution_admission(candidate, unavailable);
+        CHECK_FALSE(updated.available);
+        CHECK(updated.unavailable_reason == "provider_unavailable");
+    }
+
+    TEST_CASE("forced selection fallback exposes adapter reason",
+              "[lithe][execution][admission]") {
+        execution_selection_inputs inputs;
+        inputs.candidates = {{
+            {.kind = planned_execution_kind::interpreter, .available = true, .setup_cost_ns = 0, .work_item_cost_ns = 1},
+            {.kind = planned_execution_kind::jit, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 0, .unavailable_reason = "provider_unavailable"},
+            {.kind = planned_execution_kind::simd, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 0},
+            {.kind = planned_execution_kind::metal, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 0, .unavailable_reason = "plan_rejected"},
+            {.kind = planned_execution_kind::vulkan, .available = false, .setup_cost_ns = 0, .work_item_cost_ns = 0},
+        }};
+        const execution_selection_policy policy{
+            .force = planned_execution_kind::metal,
+            .force_requires_success = false,
+        };
+
+        const auto selection = select_execution_plan(inputs, policy);
+
+        CHECK(selection.fell_back);
+        CHECK(selection.selected == planned_execution_kind::interpreter);
+        CHECK(selection.fallback_reason == "plan_rejected");
     }
 } // namespace

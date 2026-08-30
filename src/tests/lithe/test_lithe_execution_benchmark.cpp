@@ -79,3 +79,24 @@ TEST_CASE(
     REQUIRE_FALSE(lithe::benchmark::calibrate_candidate_cost(
         baseline, measurement, {.work_items = 10}).has_value());
 }
+
+TEST_CASE(
+    "measure_provider annotates benchmark scope and separates phase timings",
+    "[lithe][benchmark][execution][scope]"
+) {
+    const auto measurement = lithe::benchmark::measure_provider(
+        [] { return 21; },
+        [](const int artifact) { return artifact * 2; },
+        [](const int result) { return result == 42; },
+        lithe::benchmark::benchmark_options{
+            .warmup_runs = 0,
+            .measured_runs = 2,
+            .scope = lithe::benchmark::benchmark_scope::direct_entry,
+        });
+
+    REQUIRE(measurement.equivalent);
+    REQUIRE(measurement.scope == lithe::benchmark::benchmark_scope::direct_entry);
+    REQUIRE(measurement.phases.compile_ns == measurement.cold_compile_ns);
+    REQUIRE(measurement.phases.warm_execution_ns.size() == measurement.warm_execution_ns.size());
+}
+

@@ -139,6 +139,39 @@ namespace lithe::execution {
     static_assert(std::is_trivially_copyable_v<backend_capability_set>);
 
     // =========================================================================
+    // Execution admission vocabulary (Phase 1 adapter surface)
+    // =========================================================================
+
+    enum class backend_provider : std::uint8_t {
+        unknown = 0,
+        host,
+        simd,
+        metal,
+        vulkan,
+    };
+
+    enum class backend_admission_reason : std::uint8_t {
+        admitted = 0,
+        plan_rejected,
+        provider_unavailable,
+        policy_restricted,
+        installation_failed,
+        dispatch_failed,
+        unknown,
+    };
+
+    struct backend_admission_state {
+        backend_provider provider = backend_provider::unknown;
+        bool plan_admitted = false;
+        bool provider_available = false;
+        backend_admission_reason reason = backend_admission_reason::unknown;
+
+        [[nodiscard]] constexpr bool usable() const noexcept {
+            return plan_admitted && provider_available;
+        }
+    };
+
+    // =========================================================================
     // IR-kind identity + artifact_class classification
     // =========================================================================
 

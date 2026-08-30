@@ -750,6 +750,7 @@ namespace lithe::codegen::hl {
         std::uint64_t reusable_data_byte_cost_ns = 0;
         std::uint64_t transfer_byte_cost_ns = 0;
         bool cached_setup_cost_known = false;
+        std::string_view unavailable_reason{};
     };
 
     enum class execution_cache_state : std::uint8_t {
@@ -796,6 +797,8 @@ namespace lithe::codegen::hl {
     struct execution_selection {
         planned_execution_kind selected = planned_execution_kind::interpreter;
         planned_execution_kind fallback = planned_execution_kind::interpreter;
+        std::string_view selected_reason{};
+        std::string_view fallback_reason{};
         std::uint64_t estimated_cost_ns = 0;
         bool forced = false;
         bool fell_back = false;
@@ -808,6 +811,8 @@ namespace lithe::codegen::hl {
         std::uint64_t work_items = 0;
         std::uint64_t estimated_cost_ns = 0;
         std::uint32_t evaluated_candidates = 0;
+        std::string_view selected_reason{};
+        std::string_view fallback_reason{};
         bool fell_back = false;
         bool force_unsatisfied = false;
     };
@@ -882,20 +887,27 @@ namespace lithe::codegen::hl {
         execution_selection out;
         out.fallback = interpreter != nullptr && interpreter->available
             ? planned_execution_kind::interpreter : planned_execution_kind::jit;
+        out.selected_reason = "auto";
         if (policy.force.has_value()) {
             const auto* forced = candidate_for(*policy.force);
             if (forced != nullptr && forced->available && execution_candidate_legal(forced->kind, inputs, policy)) {
                 out.selected = forced->kind;
                 out.estimated_cost_ns = estimated_execution_cost(*forced, workload);
                 out.forced = true;
+                out.selected_reason = "forced";
                 out.evaluated_candidates = 1;
             } else {
                 if (policy.force_requires_success) {
                     out.selected = *policy.force;
                     out.force_unsatisfied = true;
+                    out.selected_reason = "forced_unsatisfied";
                 } else {
                     out.selected = out.fallback;
                     out.fell_back = true;
+                    out.selected_reason = "forced_fallback";
+                    out.fallback_reason = forced != nullptr && !forced->available
+                        ? forced->unavailable_reason
+                        : "forced_not_legal";
                 }
             }
         } else {
@@ -908,13 +920,21 @@ namespace lithe::codegen::hl {
                 // SIMD, Metal, Vulkan. On macOS callers place Metal before Vulkan.
                 if (cost < best_cost) { best_cost = cost; out.selected = candidate.kind; }
             }
-            if (out.evaluated_candidates == 0) { out.selected = out.fallback; out.fell_back = true; }
+            if (out.evaluated_candidates == 0) {
+                out.selected = out.fallback;
+                out.fell_back = true;
+                out.selected_reason = "fallback_no_eligible";
+                out.fallback_reason = "no_eligible_candidate";
+            } else {
+                out.selected_reason = "lowest_estimated_cost";
+            }
             out.estimated_cost_ns = best_cost == std::numeric_limits<std::uint64_t>::max() ? 0 : best_cost;
         }
         if constexpr (Observe) {
             if (observer != nullptr) observability::emit<true>(*observer, execution_selection_event{
                 out.selected, workload.work_items, out.estimated_cost_ns,
-                out.evaluated_candidates, out.fell_back, out.force_unsatisfied});
+                out.evaluated_candidates, out.selected_reason, out.fallback_reason,
+                out.fell_back, out.force_unsatisfied});
         }
         return out;
     }

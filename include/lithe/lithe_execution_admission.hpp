@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string_view>
 
 namespace lithe::codegen::hl {
     enum class execution_admission_reason : std::uint8_t {
@@ -15,6 +16,19 @@ namespace lithe::codegen::hl {
         installation_failed,
         dispatch_failed,
     };
+
+    [[nodiscard]] constexpr std::string_view to_reason_code(
+        const execution_admission_reason reason) noexcept {
+        switch (reason) {
+        case execution_admission_reason::admitted: return "admitted";
+        case execution_admission_reason::plan_rejected: return "plan_rejected";
+        case execution_admission_reason::provider_unavailable: return "provider_unavailable";
+        case execution_admission_reason::installation_failed: return "installation_failed";
+        case execution_admission_reason::dispatch_failed: return "dispatch_failed";
+        }
+        return "unknown";
+    }
+
 
     struct execution_backend_admission {
         planned_execution_kind kind = planned_execution_kind::interpreter;
@@ -30,7 +44,11 @@ namespace lithe::codegen::hl {
     [[nodiscard]] constexpr execution_candidate_cost apply_execution_admission(
         execution_candidate_cost candidate,
         const execution_backend_admission admission) noexcept {
-        if (candidate.kind == admission.kind) candidate.available = admission.usable();
+        if (candidate.kind == admission.kind) {
+            candidate.available = admission.usable();
+            candidate.unavailable_reason = admission.usable() ? std::string_view{}
+                : to_reason_code(admission.reason);
+        }
         return candidate;
     }
 
@@ -40,6 +58,8 @@ namespace lithe::codegen::hl {
         for (auto& candidate : inputs.candidates) {
             if (candidate.kind != admission.kind) continue;
             candidate.available = admission.usable();
+            candidate.unavailable_reason = admission.usable() ? std::string_view{}
+                : to_reason_code(admission.reason);
             return true;
         }
         return false;

@@ -327,3 +327,84 @@ TEST_CASE (
     debug_sel.debug_policy.enabled = true;
     CHECK(debug_sel.debug_policy.enabled);
 }
+
+TEST_CASE(
+    "cost_based_backend_selector: adapter plan rejection removes backend",
+    "[selection][admission]") {
+    al::cost_based_backend_selector sel;
+    al::negotiation_report_buffer report;
+
+    ex::compile_requirements reqs;
+    reqs.required = ex::backend_capability_set::from({ex::backend_feature::interpreter_execution});
+    reqs.allowed_modes.set(ex::execution_mode::interpret);
+
+    ex::execution_mode_set interp;
+    interp.set(ex::execution_mode::interpret);
+
+    std::array<al::backend_capability_info, 2> backends{{
+        {.backend_id = "simd_like",
+         .caps = ex::backend_capability_set::from({ex::backend_feature::interpreter_execution}),
+         .supported_modes = interp,
+         .available = true,
+         .admission = ex::backend_admission_state{
+             .provider = ex::backend_provider::simd,
+             .plan_admitted = false,
+             .provider_available = true,
+             .reason = ex::backend_admission_reason::plan_rejected,
+         }},
+        {.backend_id = "interp",
+         .caps = ex::backend_capability_set::from({ex::backend_feature::interpreter_execution}),
+         .supported_modes = interp,
+         .available = true},
+    }};
+
+    al::selection_explanation explanation;
+    auto result = sel(backends, reqs, report, &explanation);
+    REQUIRE(result.has_value());
+    CHECK(result->backend_id == "interp");
+
+    bool saw_plan_rejected = false;
+    for (const auto& d : explanation.decisions)
+        if (!d.accepted && d.backend_id == "simd_like" && d.reason_code == "plan_rejected")
+            saw_plan_rejected = true;
+    CHECK(saw_plan_rejected);
+}
+
+TEST_CASE(
+    "cost_based_backend_selector: adapter provider unavailability is reason-coded",
+    "[selection][admission]") {
+    al::cost_based_backend_selector sel;
+    al::negotiation_report_buffer report;
+
+    ex::compile_requirements reqs;
+    reqs.required = ex::backend_capability_set::from({ex::backend_feature::interpreter_execution});
+    reqs.allowed_modes.set(ex::execution_mode::interpret);
+
+    ex::execution_mode_set interp;
+    interp.set(ex::execution_mode::interpret);
+
+    std::array<al::backend_capability_info, 1> backends{{
+        {.backend_id = "metal",
+         .caps = ex::backend_capability_set::from({ex::backend_feature::interpreter_execution}),
+         .supported_modes = interp,
+         .available = true,
+         .admission = ex::backend_admission_state{
+             .provider = ex::backend_provider::metal,
+             .plan_admitted = true,
+             .provider_available = false,
+             .reason = ex::backend_admission_reason::provider_unavailable,
+         }},
+    }};
+
+    al::selection_explanation explanation;
+    auto result = sel(backends, reqs, report, &explanation);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().detail == "no eligible backend found");
+
+    bool saw_provider_unavailable = false;
+    for (const auto& d : explanation.decisions)
+        if (!d.accepted && d.reason_code == "provider_unavailable")
+            saw_provider_unavailable = true;
+    CHECK(saw_provider_unavailable);
+}
+
