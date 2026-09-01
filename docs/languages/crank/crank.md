@@ -18,29 +18,46 @@ C++23, header-only, no virtual, no macros. Namespace: `crank`.
 
 ## Table of Contents
 
-This reference is large (127 sections). Entries are grouped by the seven-module compiler band; jump to a
-band, then scan its sections.
+This reference is large (127 sections). Entries are grouped by the seven-module compiler band; jump to a band, then scan
+its sections.
 
-- **Overview** — [Design Goals](#design-goals) · [Grammar Summary](#grammar-summary) · [Architecture](#architecture) · [Module Architecture](#module-architecture) · [Algorithms Used](#algorithms-used) · [Capability Matrix](#capability-matrix) · [Entry Point](#entry-point)
-- **Generic foundation** — [Generic Language Layer](#generic-language-layer) · [Storage & the Generic IR](#storage--the-generic-ir) · [Two Module Concepts](#two-module-concepts)
-- **Module 1 — Frontend** — [Lexical Grammar](#lexical-grammar) · [Automatic Semicolon Insertion (ASI)](#automatic-semicolon-insertion-asi) · [AST Tag Band (1000–1015)](#ast-tag-band-10001015) · [Parse → Vakya Flow](#parse--vakya-flow) · [Typed AST Node Types](#typed-ast-node-types-build_asthpp) · [Function Declaration Shape](#function-declaration-shape) · [Postfix Operators & Special Builtins](#postfix-operators--special-builtins) · [JSON Dump API](#json-dump-api) · [Parse Statistics](#parse-statistics) · [Source Spans](#source-spans)
-- **Module 2 — Semantics** — [Host Embedding Architecture](#host-embedding-architecture) · [Standard Library (`std/`)](#standard-library-std) · [Type System](#type-system) · [Inference vs Public Boundary](#inference-vs-public-boundary) · [Effect / Capability Model](#effect--capability-model) · [Module Resolver Order](#module-resolver-order) · [Host Embedding (no macros)](#host-embedding-no-macros) · [Quick Start: Host Embedding](#quick-start-host-embedding-contexthpp) · [Semantic JSON Dumps](#semantic-json-dumps)
-- **Module 3 — Verification** — [Obligation Families](#obligation-families) · [Three-Way Discharge Outcome](#three-way-discharge-outcome) · [`verify_policy` Modes](#verify_policy-modes) · [`safety_failure` Policy + `SafetyError`](#safety_failure-policy--safetyerror) · [Predicate Sublanguage](#predicate-sublanguage) · [Assumption Context Algorithm](#assumption-context-algorithm) · [Refinement Types](#refinement-types) · [Verification JSON Dumps](#verification-json-dumps)
-- **Module 4 — Execution** — [Frontend Lowering Contract](#frontend-lowering-contract) · [Lowering to Lithe HL MIR](#lowering-to-lithe-hl-mir) · [Compilation Pipeline](#compilation-pipeline) · [Engine Façade (`engine.hpp`)](#engine-façade-enginehpp) · [Backend Intelligence](#backend-intelligence-plan_view-i) · [Module Façade](#module-façade-engineload-module_graph_view) · [Extern Functions](#extern-functions-hostlink-x) · [Optimization Profiles](#optimization-profiles) · [HL MIR Lowering](#hl-mir-lowering) · [Scalar Path + Interpreter](#scalar-path--interpreter) · [Automatic Execution Planning](#automatic-execution-planning) · [Pravaha Extraction + `spawn`/`await`](#pravaha-extraction--spawnawait) · [AOT Cache](#aot-cache) · [AOT Security Policy](#aot-security-policy) · [Execution Policy](#execution-policy)
-- **Module 5A — Transactions** — [Transaction Runtime Lowering](#transaction-runtime-lowering) · [Transaction State Machine](#transaction-state-machine-transaction_state-31) · [Transaction Runtime Context](#transaction-runtime-context-transaction_context-32) · [Typed Error Discriminant](#typed-error-discriminant-txerrorkind-51) · [Retry Policy](#retry-policy-retry_policy-backoff_kind-103) · [Isolation Levels](#isolation-levels-8) · [Resource Capability Checker](#resource-capability-checker-63) · [Full Commit Report](#full-commit-report-crankcommitreport-151) · [Observability](#observability-transaction_event_kind-161) · [WAL Record Kinds](#wal-record-kinds-log_record_kind-142) · [Transaction Participant Concept + 2PC](#transaction-participant-concept--2pc-transactionparticipant-132134)
-- **Physical MIR / backend** — [Physical-MIR Verifier Gate](#physical-mir-verifier-gate-verify_mirhpp) · [Capability Discovery](#capability-discovery-capabilityhpp) · [SIMD Legality](#simd-legality-simd_legalityhpp) · [GPU Residency, Transfers, Events](#gpu-residency-transfers-events-gpu_memoryhpp) · [Cancellation, Deadlines, Task FSM](#cancellation-deadlines-task-fsm-cancellationhpp) · [Plan Construction + Execution](#plan-construction--execution-planhpp) · [Coroutine Backend](#coroutine-backend-coroutinehpp)
-- **Module 5B — Generics** — [Monomorphization Model](#monomorphization-model) · [Trait/Impl Conformance](#traitimpl-conformance) · [Bound Vocabulary](#bound-vocabulary) · [Const Generics](#const-generics) · [Monomorphizer API](#monomorphizer-api) · [Generics Feature Status](#generics-feature-status)
-- **Module 6 — Extensions** — [`annotation_kind` and `annotation_strength`](#annotation_kind-and-annotation_strength) · [Descriptor Registration](#descriptor-registration) · [Namespacing Rules](#namespacing-rules) · [Resolution Policy Flow](#resolution-policy-flow) · [Annotation Resolution Algorithm](#annotation-resolution-algorithm) · [Plugin Model](#plugin-model)
-- **Views / linear types** — [Conceptual Model](#conceptual-model) · [Surface Syntax](#surface-syntax) · [View Type Model](#view-type-model-43) · [Obligation Model](#obligation-model-44) · [Borrow Rule](#borrow-rule-84) · [Sutra Domain Framework Binding](#sutra-domain-framework-binding-45) · [Lowering Model](#lowering-model-46) · [Host Interop](#host-interop-47)
-- **Feature charter** — [Language Features](#language-features) · [Execution Features](#execution-features) · [Transaction Features](#transaction-features) · [Tooling and Artifact Features](#tooling-and-artifact-features) · [Lean Charter](#lean-charter--feature-placement) · [Explicit Non-Goals](#explicit-non-goals) · [See Also](#see-also)
+-
+**Overview** — [Design Goals](#design-goals) · [Grammar Summary](#grammar-summary) · [Architecture](#architecture) · [Module Architecture](#module-architecture) · [Algorithms Used](#algorithms-used) · [Capability Matrix](#capability-matrix) · [Entry Point](#entry-point)
+- **Generic
+  foundation** — [Generic Language Layer](#generic-language-layer) · [Storage & the Generic IR](#storage--the-generic-ir) · [Two Module Concepts](#two-module-concepts)
+- **Module 1 —
+  Frontend** — [Lexical Grammar](#lexical-grammar) · [Automatic Semicolon Insertion (ASI)](#automatic-semicolon-insertion-asi) · [AST Tag Band (1000–1015)](#ast-tag-band-10001015) · [Parse → Vakya Flow](#parse--vakya-flow) · [Typed AST Node Types](#typed-ast-node-types-build_asthpp) · [Function Declaration Shape](#function-declaration-shape) · [Postfix Operators & Special Builtins](#postfix-operators--special-builtins) · [JSON Dump API](#json-dump-api) · [Parse Statistics](#parse-statistics) · [Source Spans](#source-spans)
+- **Module 2 — Semantics** — [Host Embedding Architecture](#host-embedding-architecture) · [Standard Library (
+  `std/`)](#standard-library-std) · [Type System](#type-system) · [Inference vs Public Boundary](#inference-vs-public-boundary) · [Effect / Capability Model](#effect--capability-model) · [Module Resolver Order](#module-resolver-order) · [Host Embedding (no macros)](#host-embedding-no-macros) · [Quick Start: Host Embedding](#quick-start-host-embedding-contexthpp) · [Semantic JSON Dumps](#semantic-json-dumps)
+- **Module 3 —
+  Verification** — [Obligation Families](#obligation-families) · [Three-Way Discharge Outcome](#three-way-discharge-outcome) · [
+  `verify_policy` Modes](#verify_policy-modes) · [`safety_failure` Policy +
+  `SafetyError`](#safety_failure-policy--safetyerror) · [Predicate Sublanguage](#predicate-sublanguage) · [Assumption Context Algorithm](#assumption-context-algorithm) · [Refinement Types](#refinement-types) · [Verification JSON Dumps](#verification-json-dumps)
+- **Module 4 —
+  Execution** — [Frontend Lowering Contract](#frontend-lowering-contract) · [Lowering to Lithe HL MIR](#lowering-to-lithe-hl-mir) · [Compilation Pipeline](#compilation-pipeline) · [Engine Façade (
+  `engine.hpp`)](#engine-façade-enginehpp) · [Backend Intelligence](#backend-intelligence-plan_view-i) · [Module Façade](#module-façade-engineload-module_graph_view) · [Extern Functions](#extern-functions-hostlink-x) · [Optimization Profiles](#optimization-profiles) · [HL MIR Lowering](#hl-mir-lowering) · [Scalar Path + Interpreter](#scalar-path--interpreter) · [Automatic Execution Planning](#automatic-execution-planning) · [Pravaha Extraction +
+  `spawn`/
+  `await`](#pravaha-extraction--spawnawait) · [AOT Cache](#aot-cache) · [AOT Security Policy](#aot-security-policy) · [Execution Policy](#execution-policy)
+- **Module 5A —
+  Transactions** — [Transaction Runtime Lowering](#transaction-runtime-lowering) · [Transaction State Machine](#transaction-state-machine-transaction_state-31) · [Transaction Runtime Context](#transaction-runtime-context-transaction_context-32) · [Typed Error Discriminant](#typed-error-discriminant-txerrorkind-51) · [Retry Policy](#retry-policy-retry_policy-backoff_kind-103) · [Isolation Levels](#isolation-levels-8) · [Resource Capability Checker](#resource-capability-checker-63) · [Full Commit Report](#full-commit-report-crankcommitreport-151) · [Observability](#observability-transaction_event_kind-161) · [WAL Record Kinds](#wal-record-kinds-log_record_kind-142) · [Transaction Participant Concept + 2PC](#transaction-participant-concept--2pc-transactionparticipant-132134)
+- **Physical MIR /
+  backend** — [Physical-MIR Verifier Gate](#physical-mir-verifier-gate-verify_mirhpp) · [Capability Discovery](#capability-discovery-capabilityhpp) · [SIMD Legality](#simd-legality-simd_legalityhpp) · [GPU Residency, Transfers, Events](#gpu-residency-transfers-events-gpu_memoryhpp) · [Cancellation, Deadlines, Task FSM](#cancellation-deadlines-task-fsm-cancellationhpp) · [Plan Construction + Execution](#plan-construction--execution-planhpp) · [Coroutine Backend](#coroutine-backend-coroutinehpp)
+- **Module 5B —
+  Generics** — [Monomorphization Model](#monomorphization-model) · [Trait/Impl Conformance](#traitimpl-conformance) · [Bound Vocabulary](#bound-vocabulary) · [Const Generics](#const-generics) · [Monomorphizer API](#monomorphizer-api) · [Generics Feature Status](#generics-feature-status)
+- **Module 6 — Extensions** — [`annotation_kind` and
+  `annotation_strength`](#annotation_kind-and-annotation_strength) · [Descriptor Registration](#descriptor-registration) · [Namespacing Rules](#namespacing-rules) · [Resolution Policy Flow](#resolution-policy-flow) · [Annotation Resolution Algorithm](#annotation-resolution-algorithm) · [Plugin Model](#plugin-model)
+- **Views / linear
+  types** — [Conceptual Model](#conceptual-model) · [Surface Syntax](#surface-syntax) · [View Type Model](#view-type-model-43) · [Obligation Model](#obligation-model-44) · [Borrow Rule](#borrow-rule-84) · [Sutra Domain Framework Binding](#sutra-domain-framework-binding-45) · [Lowering Model](#lowering-model-46) · [Host Interop](#host-interop-47)
+- **Feature
+  charter** — [Language Features](#language-features) · [Execution Features](#execution-features) · [Transaction Features](#transaction-features) · [Tooling and Artifact Features](#tooling-and-artifact-features) · [Lean Charter](#lean-charter--feature-placement) · [Explicit Non-Goals](#explicit-non-goals) · [See Also](#see-also)
 
 ---
 
 ## Architecture
 
-Crank is a seven-module compiler over a language-neutral foundation layer (`languages/generic/`). Strict
-downward dependency: each module consumes the artifact of the one above and never reaches back up. The
-frontend produces a Vakya AST; every later stage is a transform over typed, obligation-checked tree or MIR.
+Crank is a seven-module compiler over a language-neutral foundation layer (`languages/generic/`). Strict downward
+dependency: each module consumes the artifact of the one above and never reaches back up. The frontend produces a Vakya
+AST; every later stage is a transform over typed, obligation-checked tree or MIR.
 
 ```
 Source text
@@ -149,7 +166,7 @@ All extension annotations require a namespace prefix (e.g. `@company.my_hint`).
 | 5B — Generics     | `generics.hpp`, `monomorphize.hpp`                                                                  | Monomorphization, trait/impl, bound checking                                                                                                                                                                                                                                                                     |
 | 6 — Extensions    | `annotation.hpp`                                                                                    | Typed annotation registry, plugin model                                                                                                                                                                                                                                                                          |
 | 7 — Engine        | `engine.hpp`                                                                                        | One-call façade: `eval`/`run`/`compile`/`load`; `engine_options`, `program`, `value`, `module_handle`, `module_graph_view`, `run_report`, `plan_view`; `verify_extern_fn_decl`                                                                                                                                   |
-| Lithe contract    | `lithe/lithe_ir/frontend/lowering_contract.hpp`                                                      | Normative Crank→IR type map + capability map (Lithe-owned)                                                                                                                                                                                                                                                       |
+| Lithe contract    | `lithe/lithe_ir/frontend/lowering_contract.hpp`                                                     | Normative Crank→IR type map + capability map (Lithe-owned)                                                                                                                                                                                                                                                       |
 
 ---
 
@@ -412,18 +429,20 @@ execute
 
 ## Storage & the Generic IR
 
-Crank's AST storage has two representations, both in `include/languages/crank/build_ast.hpp`, and both are **populated simultaneously** during every parse (dual-write in `AstBuilder`):
+Crank's AST storage has two representations, both in `include/languages/crank/build_ast.hpp`, and both are **populated
+simultaneously** during every parse (dual-write in `AstBuilder`):
 
-| Name               | Type                                          | Use case                                                   |
-|--------------------|-----------------------------------------------|------------------------------------------------------------|
-| `crank_ast_arena`  | `lang::ast_arena<crank_ast_node>`             | Existing code — variant nodes, children embedded inline    |
-| `crank_ir_module`  | `lang::ir_module<crank_kind, crank_node_ext>` | New code — flat ir_node store, children in sidecar vector  |
+| Name              | Type                                          | Use case                                                  |
+|-------------------|-----------------------------------------------|-----------------------------------------------------------|
+| `crank_ast_arena` | `lang::ast_arena<crank_ast_node>`             | Existing code — variant nodes, children embedded inline   |
+| `crank_ir_module` | `lang::ir_module<crank_kind, crank_node_ext>` | New code — flat ir_node store, children in sidecar vector |
 
 Both live in `crank_source_file::arena` and `crank_source_file::ir_mod`.
 
 ### crank_ir_module (typed-AST flavor of ir_module)
 
-`crank_ir_module` is `lang::ir_module<crank_kind, crank_node_ext>` — the **typed-AST** end of the simple→complex ExtPayload ladder defined in the generic IR layer.
+`crank_ir_module` is `lang::ir_module<crank_kind, crank_node_ext>` — the **typed-AST** end of the simple→complex
+ExtPayload ladder defined in the generic IR layer.
 
 ```cpp
 // include/languages/crank/build_ast.hpp
@@ -459,6 +478,7 @@ lexy parse_tree event
 ```
 
 `crank_source_file` after a parse:
+
 ```cpp
 sf.arena.size() == sf.ir_mod.size()   // always equal (parity invariant)
 sf.ir_mod.root() != lang::k_null_ir   // root set at source_file exit
@@ -478,14 +498,16 @@ All opt-in; zero cost when unused.
 
 ### Parser stays lexy (design constraint)
 
-Crank parses with **lexy** (`languages/crank/lexer.hpp`, `parser.hpp`). This is a permanent design constraint — there is no samasa parser migration planned. `crank_ir_module` is a **storage** change only; the parse path is byte-for-byte unchanged.
+Crank parses with **lexy** (`languages/crank/lexer.hpp`, `parser.hpp`). This is a permanent design constraint — there is
+no samasa parser migration planned. `crank_ir_module` is a **storage** change only; the parse path is byte-for-byte
+unchanged.
 
 ---
 
 ## Two Module Concepts
 
-Crank has **two orthogonal "module" concepts**. Both are supported; they do not overlap.
-(Rust precedent: `mod`/`use` file layer vs generics parametric layer.)
+Crank has **two orthogonal "module" concepts**. Both are supported; they do not overlap. (Rust precedent: `mod`/`use`
+file layer vs generics parametric layer.)
 
 | Concept                   | Surface syntax                 | Unit                        | Descriptor                         | Purpose                                                                |
 |---------------------------|--------------------------------|-----------------------------|------------------------------------|------------------------------------------------------------------------|
@@ -493,18 +515,17 @@ Crank has **two orthogonal "module" concepts**. Both are supported; they do not 
 | **Parametric module**     | `module M[T: Bound] { … }`     | a named block inside a file | `crank::generic_module_descriptor` | reusable type/const-parameterized code, monomorphized on instantiation |
 
 **Single-source visibility.** Exports/visibility live in exactly one place — the
-`symbol_table` (uppercase name → exported; explicit `pub` forces export regardless of
-case). Both file modules (`import` pulls exported symbols) and parametric modules (`pub`
+`symbol_table` (uppercase name → exported; explicit `pub` forces export regardless of case). Both file modules (`import`
+pulls exported symbols) and parametric modules (`pub`
 items) read visibility from it. There is no separate export/visibility struct.
 
 **Generic-layer backing.** Module-2 semantics build on the language-neutral `lang::` layer
-(`languages/generic/module/module_system.hpp` + `import_resolver.hpp`): file-module
-identity/resolution, the dependency graph (with `cycle_nodes()` diagnostics), and the import
-pipeline (version/capability/circular checks + symbol flow) are `lang::`-owned. Crank retains
-only its extensions — the `.crank` resolver preset, monomorphization instantiation keys, and
-`@host/@gpu` ext-band effects — and converts at the import boundary (see the flow below) so
-crank's own fingerprints and symbol-table fields (source span, HM type-var binding) are
-unchanged.
+(`languages/generic/module/module_system.hpp` + `import_resolver.hpp`): file-module identity/resolution, the dependency
+graph (with `cycle_nodes()` diagnostics), and the import pipeline (version/capability/circular checks + symbol flow) are
+`lang::`-owned. Crank retains only its extensions — the `.crank` resolver preset, monomorphization instantiation keys,
+and
+`@host/@gpu` ext-band effects — and converts at the import boundary (see the flow below) so crank's own fingerprints and
+symbol-table fields (source span, HM type-var binding) are unchanged.
 
 ### File-module flow (`package` / `import`)
 
@@ -523,8 +544,8 @@ parse(package/import)
   → compile_order (topo, importees first) drives engine::load
 ```
 
-The import pipeline is invoked from `engine::load` for source modules; a hard import error
-surfaces as a `module_resolve`-stage `crank_error` carrying the `LANG-IMP-00x` code.
+The import pipeline is invoked from `engine::load` for source modules; a hard import error surfaces as a
+`module_resolve`-stage `crank_error` carrying the `LANG-IMP-00x` code.
 
 ### Parametric-module flow (`module M[…]{}`)
 
@@ -638,16 +659,15 @@ if (!result)
 
 ## Standard Library (`std/`)
 
-The standard library is **not a separate runtime**. It is a reflection-driven
-projection of existing C++/STL (and a thin libuv veneer) into Crank through the
-same host-embedding seams described above — `context::register_function_descriptor`
-(typed thunk + options) plus `ffi_module_builder` (import-visible `std.x` symbol).
-The language core is untouched, and users pay only for the modules they install.
+The standard library is **not a separate runtime**. It is a reflection-driven projection of existing C++/STL (and a thin
+libuv veneer) into Crank through the same host-embedding seams described above — `context::register_function_descriptor`
+(typed thunk + options) plus `ffi_module_builder` (import-visible `std.x` symbol). The language core is untouched, and
+users pay only for the modules they install.
 
-Location: `include/languages/crank/std/`. Umbrella: `std/std.hpp`. Shared
-registration funnel: `std/detail/register.hpp` (`detail::add_fn<HostName, Fn>`
-builds the typed descriptor and records the ffi symbol in one call; arity comes
-from `callable_traits`, never hand-typed).
+Location: `include/languages/crank/std/`. Umbrella: `std/std.hpp`. Shared registration funnel: `std/detail/register.hpp`
+(`detail::add_fn<HostName, Fn>`
+builds the typed descriptor and records the ffi symbol in one call; arity comes from `callable_traits`, never
+hand-typed).
 
 ### Install API
 
@@ -661,72 +681,67 @@ crank::stdlib::install_std_math(e.context());
 crank::stdlib::install_std_string(e.context());
 ```
 
-`install_std_all` installs the always-on modules and adds the guarded ones only
-when their dependency is present (see guards below).
+`install_std_all` installs the always-on modules and adds the guarded ones only when their dependency is present (see
+guards below).
 
 ### Modules
 
-| Module            | Install fn                    | Backing                | Effect / capability        | Representative surface                              |
-|-------------------|-------------------------------|------------------------|----------------------------|-----------------------------------------------------|
-| `std.core`        | `install_std_core`            | `<optional>`/`<expected>` | pure                    | `IsSome`, `UnwrapOr`, `Clamp`                       |
-| `std.math`        | `install_std_math`            | `<cmath>`/`<numbers>`  | pure · deterministic       | `Sqrt`, `Pow`, `MinInt`, `Pi`                       |
-| `std.string`      | `install_std_string`          | `std::string`          | pure                       | `Trim`, `ToUpper`, `Split`, `Join`, `Contains`      |
-| `std.collections` | `install_std_collections`     | `vector`/`unordered_map`/`unordered_set` | pure     | `VecLen`, `MapGet`, `SetContains`                   |
-| `std.containers`  | `install_std_containers`      | `containers::union_find` + STL `vector` | pure      | `ConnectedComponents`, `TopoOrder`, `BfsOrder`, `VecIntSort` |
-| `std.time`        | `install_std_time`            | `<chrono>`/`<thread>`  | thread-safe; `SleepMillis` blocking | `NowNanos`, `SleepMillis`                  |
-| `std.io`          | `install_std_io`              | `<print>` + `stdin`    | IO · Read/Write · blocking | `Print`, `Println`, `EPrintln`, `ReadLine`, `ReadAllStdin` |
-| `std.fs`          | `install_std_fs`              | `std::filesystem`      | FileSystem · Read/Write · blocking | `ReadFile`, `WriteFile`, `Exists`, `Remove` |
-| `std.process`     | `install_std_process`         | `std::getenv` + libuv  | IO · Read/Execute          | `Env`, `HasEnv`, `SpawnWait`†                       |
-| `std.net`         | `install_std_net`             | libuv (`uv_tcp`/`uv_udp`) | Network · Network       | `ConnectTcp`, `ListenTcp`, `BindUdp`†               |
-| `std.json`        | `install_std_json`            | Glaze (`glz::generic`) | pure                       | `Parse`, `Stringify`, `GetString`, `GetInt`‡        |
+| Module            | Install fn                | Backing                                  | Effect / capability                 | Representative surface                                       |
+|-------------------|---------------------------|------------------------------------------|-------------------------------------|--------------------------------------------------------------|
+| `std.core`        | `install_std_core`        | `<optional>`/`<expected>`                | pure                                | `IsSome`, `UnwrapOr`, `Clamp`                                |
+| `std.math`        | `install_std_math`        | `<cmath>`/`<numbers>`                    | pure · deterministic                | `Sqrt`, `Pow`, `MinInt`, `Pi`                                |
+| `std.string`      | `install_std_string`      | `std::string`                            | pure                                | `Trim`, `ToUpper`, `Split`, `Join`, `Contains`               |
+| `std.collections` | `install_std_collections` | `vector`/`unordered_map`/`unordered_set` | pure                                | `VecLen`, `MapGet`, `SetContains`                            |
+| `std.containers`  | `install_std_containers`  | `containers::union_find` + STL `vector`  | pure                                | `ConnectedComponents`, `TopoOrder`, `BfsOrder`, `VecIntSort` |
+| `std.time`        | `install_std_time`        | `<chrono>`/`<thread>`                    | thread-safe; `SleepMillis` blocking | `NowNanos`, `SleepMillis`                                    |
+| `std.io`          | `install_std_io`          | `<print>` + `stdin`                      | IO · Read/Write · blocking          | `Print`, `Println`, `EPrintln`, `ReadLine`, `ReadAllStdin`   |
+| `std.fs`          | `install_std_fs`          | `std::filesystem`                        | FileSystem · Read/Write · blocking  | `ReadFile`, `WriteFile`, `Exists`, `Remove`                  |
+| `std.process`     | `install_std_process`     | `std::getenv` + libuv                    | IO · Read/Execute                   | `Env`, `HasEnv`, `SpawnWait`†                                |
+| `std.net`         | `install_std_net`         | libuv (`uv_tcp`/`uv_udp`)                | Network · Network                   | `ConnectTcp`, `ListenTcp`, `BindUdp`†                        |
+| `std.json`        | `install_std_json`        | Glaze (`glz::generic`)                   | pure                                | `Parse`, `Stringify`, `GetString`, `GetInt`‡                 |
 
 † libuv-gated · ‡ Glaze-gated (see guards).
 
 ### Guards (pay-for-use)
 
-Optional dependencies are detected via `__has_include`, so the tree builds with
-or without them:
+Optional dependencies are detected via `__has_include`, so the tree builds with or without them:
 
-- `CRANK_STD_HAS_UV` (`<uv.h>`) — enables `std.net`, `std.process.SpawnWait`, and
-  the generic RAII veneer in `std/detail/uv_loop.hpp` (`crank::uvx::loop`/`timer`,
-  dependency-free of crank types so it can be lifted out later). When absent, the
-  whole `std.net` header compiles to a no-op and `install_std_all` skips it.
-- `CRANK_STD_HAS_GLAZE` (`<glaze/glaze.hpp>`) — enables `std.json`. The DOM is
-  wrapped in an opaque, copyable `json_value` registered as a host type
-  (`type_descriptor` with empty `fields`); accessors read one top-level key with
+- `CRANK_STD_HAS_UV` (`<uv.h>`) — enables `std.net`, `std.process.SpawnWait`, and the generic RAII veneer in
+  `std/detail/uv_loop.hpp` (`crank::uvx::loop`/`timer`, dependency-free of crank types so it can be lifted out later).
+  When absent, the whole `std.net` header compiles to a no-op and `install_std_all` skips it.
+- `CRANK_STD_HAS_GLAZE` (`<glaze/glaze.hpp>`) — enables `std.json`. The DOM is wrapped in an opaque, copyable
+  `json_value` registered as a host type (`type_descriptor` with empty `fields`); accessors read one top-level key with
   a typed fallback. Absent → header no-op, skipped by `install_std_all`.
 
 Verification uses the same tooling API as any extern:
-`verify_extern_fn_decl(ctx, crank_name, "std.math.sqrt", 1)` resolves the typed
-thunk; `crank::invoke_typed<double>(*decl.descriptor, 4.0)` invokes it directly.
+`verify_extern_fn_decl(ctx, crank_name, "std.math.sqrt", 1)` resolves the typed thunk;
+`crank::invoke_typed<double>(*decl.descriptor, 4.0)` invokes it directly.
 
 ### `std.containers` — internal container algorithms
 
 Where `std.collections` exposes STL container *storage*, `std.containers`
-projects our internal container *algorithms* (`containers::union_find` plus a
-locally-built CSR adjacency) as pure functions. The typed-thunk boundary is
-copy-in/copy-out, so a graph is passed as two parallel `VecInt` endpoint arrays
-plus a node count rather than a stateful graph object — the same value-semantic
-shape the rest of the stdlib uses. Endpoints out of `[0, n)` are ignored (no
-UB). Surface: `ConnectedComponents`/`ComponentCount`/`SameComponent` (union-find),
-`BfsOrder`/`DfsOrder`/`TopoOrder`/`HasCycle`/`ReachableCount` (directed
-traversal; `TopoOrder` returns an empty vector for a cyclic graph), and the
+projects our internal container *algorithms* (`containers::union_find` plus a locally-built CSR adjacency) as pure
+functions. The typed-thunk boundary is copy-in/copy-out, so a graph is passed as two parallel `VecInt` endpoint arrays
+plus a node count rather than a stateful graph object — the same value-semantic shape the rest of the stdlib uses.
+Endpoints out of `[0, n)` are ignored (no UB). Surface: `ConnectedComponents`/`ComponentCount`/`SameComponent`
+(union-find),
+`BfsOrder`/`DfsOrder`/`TopoOrder`/`HasCycle`/`ReachableCount` (directed traversal; `TopoOrder` returns an empty vector
+for a cyclic graph), and the
 `VecIntSort`/`VecIntUnique`/`VecIntReverse`/`VecIntSum`/`VecIntConcat` helpers.
 
 ### cranki auto-installs the standard library
 
 The `cranki` REPL (`src/cranki/`) calls `install_std_all` on every fresh
-`crank::context` (construction and `reset()`), so interpreter users get the same
-stdlib surface as a C++ embedder — `import "std.containers"` and the other
-always-on modules resolve out of the box, with the libuv/glaze-guarded modules
+`crank::context` (construction and `reset()`), so interpreter users get the same stdlib surface as a C++ embedder —
+`import "std.containers"` and the other always-on modules resolve out of the box, with the libuv/glaze-guarded modules
 added when their dependency is present.
 
 ---
 
 ## Frontend Lowering Contract
 
-Lithe owns the authoritative type map between Crank source types and Lithe IR
-type strings (`lithe-ir-spec.md §5`). All Crank lowering passes MUST use
+Lithe owns the authoritative type map between Crank source types and Lithe IR type strings (`lithe-ir-spec.md §5`). All
+Crank lowering passes MUST use
 `lithe::ir::frontend` APIs; informal ad-hoc mappings are prohibited.
 
 Header: `include/lithe/lithe_ir/frontend/lowering_contract.hpp`
@@ -755,8 +770,7 @@ Header: `include/lithe/lithe_ir/frontend/lowering_contract.hpp`
 | `[N]T` (static array) | `"memref<Nx<T_ir>>"`   |
 | `[M][N]T` (2D)        | `"memref<MxNx<T_ir>>"` |
 
-Derived via `lithe::ir::frontend::tensor_type_to_ir_str(elem, rank, dims)`.
-Dimension -1 maps to `?` (dynamic).
+Derived via `lithe::ir::frontend::tensor_type_to_ir_str(elem, rank, dims)`. Dimension -1 maps to `?` (dynamic).
 
 ### Capability Map
 
@@ -776,8 +790,8 @@ Derived via `lithe::ir::frontend::crank_capability_required(crank_feature::X)`.
 ### Usage in lower_hl.hpp
 
 `tensor_info::elem_crank_type` (e.g. `"Float64"`) is resolved by
-`lower_to_hl` through `lower_tensor_type(elem_crank_type, rank, dims)`.
-Unknown element types produce a diagnostic; lowering aborts that tensor.
+`lower_to_hl` through `lower_tensor_type(elem_crank_type, rank, dims)`. Unknown element types produce a diagnostic;
+lowering aborts that tensor.
 
 ---
 
@@ -907,22 +921,22 @@ Link: `docs/lithe/lithe.md` and `docs/lithe/lithe-ir-spec.md §8, §13` for the 
 
 Concrete named algorithms in the compiler implementation, with the header they live in.
 
-| Concern | Algorithm | Where |
-|---|---|---|
-| Lexing/parsing | lexy PEG/LL(1) combinator grammar; 13-level operator-precedence table (`dsl::expression`, L1…L13 primary) | `parser.hpp` |
-| Statement termination | Automatic semicolon insertion via `line_continues` context flag + `bracket_depth` context counter | `parser.hpp` |
-| AST construction | Post-order parse-tree walk → dual store (`crank_ast_arena` variant store + `crank_ir_module` flat SoA, Stage 8b) | `build_ast.hpp` |
-| Type inference | Hindley-Milner (Algorithm-W style) inference over the Vakya tree; unification + generalization | `sema_types.hpp`, `context.hpp` |
-| Name resolution | 9-tier module resolver order (local → params → module → imports → prelude → host → …) | `resolve.hpp`, `module.hpp` |
-| Effect/capability tracking | Effect-mask propagation + capability lattice join | `effects.hpp` |
-| Safety verification | Obligation discharge via Tarka (proven / unknown / refuted three-way outcome); assumption-context refinement | `verify.hpp`, `obligations.hpp` |
-| Generics | Monomorphization by type substitution; trait/impl coherence checking; const-generic arithmetic eval | `monomorphize.hpp`, `generics.hpp`, `coherence.hpp` |
-| Lowering | 5-phase HL MIR lowering: A control-flow → branch/icmp, B integer ops, C safety → guard/trap, D defer → cleanup_region (LIFO), E transaction → tx.region | `lower_hl.hpp` |
-| Parallel extraction | Pravaha task-graph extraction from `spawn`/`await` + `@parallel` structured loops | `parallel.hpp` |
-| Transactions | 2-phase commit over `TransactionParticipant`; WAL record log; retry with backoff; Medha isolation levels | `transaction.hpp` |
-| AOT cache | Content-addressed artifact cache keyed on `lower_hl_result`; security-policy gate | `aot.hpp` |
-| Annotations | Namespaced annotation resolution: closed builtin set + prefixed-plugin lookup, kind→decision routing | `annotation.hpp` |
-| Compiler-phase parallelism | `parse_modules_parallel` / `batch_load_modules` fan-out over module set | `engine.hpp`, `execute.hpp` |
+| Concern                    | Algorithm                                                                                                                                               | Where                                               |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------|
+| Lexing/parsing             | lexy PEG/LL(1) combinator grammar; 13-level operator-precedence table (`dsl::expression`, L1…L13 primary)                                               | `parser.hpp`                                        |
+| Statement termination      | Automatic semicolon insertion via `line_continues` context flag + `bracket_depth` context counter                                                       | `parser.hpp`                                        |
+| AST construction           | Post-order parse-tree walk → dual store (`crank_ast_arena` variant store + `crank_ir_module` flat SoA, Stage 8b)                                        | `build_ast.hpp`                                     |
+| Type inference             | Hindley-Milner (Algorithm-W style) inference over the Vakya tree; unification + generalization                                                          | `sema_types.hpp`, `context.hpp`                     |
+| Name resolution            | 9-tier module resolver order (local → params → module → imports → prelude → host → …)                                                                   | `resolve.hpp`, `module.hpp`                         |
+| Effect/capability tracking | Effect-mask propagation + capability lattice join                                                                                                       | `effects.hpp`                                       |
+| Safety verification        | Obligation discharge via Tarka (proven / unknown / refuted three-way outcome); assumption-context refinement                                            | `verify.hpp`, `obligations.hpp`                     |
+| Generics                   | Monomorphization by type substitution; trait/impl coherence checking; const-generic arithmetic eval                                                     | `monomorphize.hpp`, `generics.hpp`, `coherence.hpp` |
+| Lowering                   | 5-phase HL MIR lowering: A control-flow → branch/icmp, B integer ops, C safety → guard/trap, D defer → cleanup_region (LIFO), E transaction → tx.region | `lower_hl.hpp`                                      |
+| Parallel extraction        | Pravaha task-graph extraction from `spawn`/`await` + `@parallel` structured loops                                                                       | `parallel.hpp`                                      |
+| Transactions               | 2-phase commit over `TransactionParticipant`; WAL record log; retry with backoff; Medha isolation levels                                                | `transaction.hpp`                                   |
+| AOT cache                  | Content-addressed artifact cache keyed on `lower_hl_result`; security-policy gate                                                                       | `aot.hpp`                                           |
+| Annotations                | Namespaced annotation resolution: closed builtin set + prefixed-plugin lookup, kind→decision routing                                                    | `annotation.hpp`                                    |
+| Compiler-phase parallelism | `parse_modules_parallel` / `batch_load_modules` fan-out over module set                                                                                 | `engine.hpp`, `execute.hpp`                         |
 
 ---
 
@@ -971,20 +985,19 @@ auto r2 = crank::execute_physical(*lp.phys);        // phase 2 (execute only)
 
 **Phase timing.** `crank_execute_result::stats` reports `lower_ns` and
 `execute_ns` separately. Lowering (HL MIR → physical MIR via
-`coordinate_lowering_pass`) is cached in `lower_hl_result::cached_phys`, so it
-runs once per result; `lower_to_physical` returns `lower_ns == 0` on a cache hit.
-`execute_physical` measures interpretation only — use it to isolate execute cost
-from lowering cost when benchmarking against native C++.
+`coordinate_lowering_pass`) is cached in `lower_hl_result::cached_phys`, so it runs once per result; `lower_to_physical`
+returns `lower_ns == 0` on a cache hit.
+`execute_physical` measures interpretation only — use it to isolate execute cost from lowering cost when benchmarking
+against native C++.
 
 ---
 
 ## Engine Façade (`engine.hpp`)
 
-`crank::engine` is a **one-call embedder API** that orchestrates the full pipeline
-(`frontend::parse` → `ctx.analyse` → `lower_to_hl` → `execute_via_interpreter`)
-with ergonomic entry points, diagnostics collation, and module/extern support.
-No pipeline stage is reimplemented; the engine delegates to the same functions as
-the staged API above.
+`crank::engine` is a **one-call embedder API** that orchestrates the full pipeline (`frontend::parse` → `ctx.analyse` →
+`lower_to_hl` → `execute_via_interpreter`)
+with ergonomic entry points, diagnostics collation, and module/extern support. No pipeline stage is reimplemented; the
+engine delegates to the same functions as the staged API above.
 
 ### Quick Start
 
@@ -1023,8 +1036,8 @@ Named presets:
 - `engine_options::scripting()` — `verify::assume`, all backends permitted, aot off.
 - `engine_options::strict()` — `verify::check`, aot on.
 
-`permit_*` options **cap** what the automatic Lithe planner may select (deployment/security gate).
-They never suppress language features. A region annotated `@gpu(required=true)` under
+`permit_*` options **cap** what the automatic Lithe planner may select (deployment/security gate). They never suppress
+language features. A region annotated `@gpu(required=true)` under
 `permit_gpu=false` is a diagnostic — no silent degradation.
 
 ### Staged API: `compile` + `execute`
@@ -1082,8 +1095,8 @@ fn read_config(path: String) -> Result[Config, AppError]
 
 **Rules:**
 
-- `Result[T, E]?` yields `T` on Ok; returns `Err(F.from(e))` on Err where the enclosing
-  function's return is `Result[_, F]` and `F: From[E]`.
+- `Result[T, E]?` yields `T` on Ok; returns `Err(F.from(e))` on Err where the enclosing function's return is
+  `Result[_, F]` and `F: From[E]`.
 - `Option[T]?` yields `T` on Some; returns `None` on None.
 - No generalized `Try` trait in v1 — `From`-based conversion only.
 - Lowering: `?` desugars to a `match` + early `return` (no new IR op).
@@ -1131,10 +1144,10 @@ Capture semantics:
 
 ## Backend Intelligence (`plan_view`, §I)
 
-Backend selection is **automatic per region** — Lithe decides per function/loop body based on
-platform capability → legality → profitability → ranking. The engine does not hardcode backends;
-`permit_*` options cap the candidate set and `target_kind` pins the assumed capability set for
-cross-compile or reproducible benchmark scenarios.
+Backend selection is **automatic per region** — Lithe decides per function/loop body based on platform capability →
+legality → profitability → ranking. The engine does not hardcode backends;
+`permit_*` options cap the candidate set and `target_kind` pins the assumed capability set for cross-compile or
+reproducible benchmark scenarios.
 
 ```cpp
 auto e = crank::engine{crank::engine_options{.diagnostics_verbose = true}};
@@ -1152,15 +1165,14 @@ if (rr) {
 }
 ```
 
-`plan_view` is populated only when `diagnostics_verbose = true`; otherwise `regions` is empty
-(zero overhead in production). `plan_id` is a stable session-unique identifier for correlating
-plan snapshots across calls.
+`plan_view` is populated only when `diagnostics_verbose = true`; otherwise `regions` is empty (zero overhead in
+production). `plan_id` is a stable session-unique identifier for correlating plan snapshots across calls.
 
-**Acceptance criterion 26 — release gate:** Every unmet `@parallel`/`@simd`/`@gpu` preference
-**must** produce a `region` with `was_fallback = true` and a non-empty `fallback_reason`
-categorising why the preferred backend was not chosen (dependence/aliasing/cost/layout/
-capability/device). Silently discarding a preference is a bug. Using `@gpu(required=true)` on a
-target that cannot support it is a **hard compile diagnostic** (not a soft fallback).
+**Acceptance criterion 26 — release gate:** Every unmet `@parallel`/`@simd`/`@gpu` preference **must** produce a
+`region` with `was_fallback = true` and a non-empty `fallback_reason`
+categorising why the preferred backend was not chosen (dependence/aliasing/cost/layout/ capability/device). Silently
+discarding a preference is a bug. Using `@gpu(required=true)` on a target that cannot support it is a **hard compile
+diagnostic** (not a soft fallback).
 
 ### `target_kind` — advisory capability pin
 
@@ -1171,8 +1183,8 @@ target that cannot support it is a **hard compile diagnostic** (not a soft fallb
 | `simd`             | Cap to scalar + SIMD; GPU excluded                |
 | `gpu_if_available` | Full set; GPU included if present                 |
 
-`target_kind` does NOT override legality or profitability filters — an ineligible backend
-is still rejected even if the target includes it.
+`target_kind` does NOT override legality or profitability filters — an ineligible backend is still rejected even if the
+target includes it.
 
 ---
 
@@ -1200,16 +1212,15 @@ for (const auto& entry : gv.modules) {
 const auto* m = gv.find("math.vector");  // nullptr if not loaded
 ```
 
-`engine::module_graph()` merges the `dep_graph` (modules resolved via `import` statements during
-analysis) with modules explicitly loaded via `engine::load()`. The order is topological — safe
-for compilation ordering.
+`engine::module_graph()` merges the `dep_graph` (modules resolved via `import` statements during analysis) with modules
+explicitly loaded via `engine::load()`. The order is topological — safe for compilation ordering.
 
 ---
 
 ## Extern Functions (`@host.link`, §X)
 
-`extern fn` binds a crank-side declared function to a registered host function without a body.
-Analysis verifies the binding against the registered descriptor.
+`extern fn` binds a crank-side declared function to a registered host function without a body. Analysis verifies the
+binding against the registered descriptor.
 
 ### Grammar (§5.6 of `grammar.md`)
 
@@ -1248,69 +1259,68 @@ if (result) {
 | `CRANK-EXT-011` | Declared arity ≠ registered descriptor arity        |
 | `CRANK-EXT-012` | Effect escalation: declared effects < host provides |
 
-`verify_extern_fn_decl` is exposed as a **host-side API** for tooling and explicit verification;
-the analysis phase runs the same check automatically for each `extern fn` declaration encountered
-during `ctx.analyse()`.
+`verify_extern_fn_decl` is exposed as a **host-side API** for tooling and explicit verification; the analysis phase runs
+the same check automatically for each `extern fn` declaration encountered during `ctx.analyse()`.
 
 ---
 
 ## Capability Matrix
 
-| Feature                                                                                        | Status                                                                                                                                                           | §ref                    |
-|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| Scalar (straight-line) execution                                                               | Implemented                                                                                                                                                      | §10.2                   |
-| CFG interpretation (branches, loops, match, early return, defer, guards, transactions)          | Implemented — `branch`/`branch_cond` interpreted; loop-carried scalar results are pending                                                                        | §10.2                   |
-| Parallel for/reduce/map                                                                        | Implemented — lowers to Pravaha                                                                                                                                  | §6.2                    |
-| spawn/await                                                                                    | Implemented                                                                                                                                                      | §7                      |
-| Transactions (compile-time checks)                                                             | Implemented                                                                                                                                                      | §7c                     |
-| Transactions (runtime/AOT lowering)                                                            | Implemented — `execute_tx.hpp`                                                                                                                                   | §7c                     |
-| Transaction state machine (`transaction_state`)                                                | Implemented — `transaction.hpp`                                                                                                                                  | §3.1                    |
-| Transaction runtime context (`transaction_context`)                                            | Implemented — `transaction.hpp`                                                                                                                                  | §3.2                    |
-| Transaction result type `Result[CommitReport, TxError]`                                        | Implemented — `transaction_tag` typing rule in `sema_types.hpp` (fresh var; Result wrapper resolved in module 5)                                                 | §2.1                    |
-| `abort(error)` typing — Never result in tx body                                                | Implemented — `tx_abort_tag` typing rule in `sema_types.hpp`                                                                                                     | §2.3                    |
-| `yield expr` typing — propagates T to enclosing tx                                             | Implemented — `tx_yield_tag` typing rule in `sema_types.hpp`; runtime `body_value` in `tx_runtime_result` via `tx_evaluator::on_yield`                           | §2.2                    |
-| `FromTxError` error conversion concept                                                         | Implemented — `transaction.hpp`                                                                                                                                  | §5.2                    |
-| Typed error discriminant (`TxErrorKind`)                                                       | Implemented — `transaction.hpp`                                                                                                                                  | §5.1                    |
-| Resource capability checker                                                                    | Implemented — `resource_capability_checker` in `transaction.hpp`                                                                                                 | §6.3                    |
-| `read_committed` isolation level                                                               | Implemented — `medha::isolation::read_committed`; `transaction_isolation` parser production updated                                                              | §8.1                    |
-| Retry policy with backoff (`retry_policy`, `backoff_kind`)                                     | Implemented — `transaction.hpp`                                                                                                                                  | §10.3                   |
-| Read-your-writes staging (§7.1)                                                                | Implemented — `detail::tx_staged_write_set` in `execute_tx.hpp`; staged writes visible to in-body reads; `old_snapshot` bypasses                                 | §7.1, §7.3              |
-| Durability levels (`durability_level`)                                                         | Implemented — `durability_level` enum in `transaction.hpp`; `CrankTransactionOptions::durability`; `CrankCommitReport::durability`; `tx_plan_record::durability` | §14.1                   |
-| Commit report lookup (`commit_report_store`, `lookup_commit_report`)                           | Implemented — `transaction.hpp`                                                                                                                                  | §15.3                   |
-| Observability event enum (`transaction_event_kind`)                                            | Implemented — `transaction.hpp`                                                                                                                                  | §16.1                   |
-| WAL record kinds (`log_record_kind`)                                                           | Implemented — `transaction.hpp`                                                                                                                                  | §14.2                   |
-| Full commit report fields                                                                      | Implemented — `CrankCommitReport` in `transaction.hpp`; adds `transaction_id` and `durability`                                                                   | §15.1                   |
-| `TransactionParticipant` concept                                                               | Implemented — `transaction.hpp`                                                                                                                                  | §13.2                   |
-| In-process two-phase commit (`crank_coordinator_2pc`)                                          | Implemented — `transaction.hpp`                                                                                                                                  | §13.3–§13.4             |
-| Generics + monomorphization                                                                    | Implemented                                                                                                                                                      | §8                      |
-| Typed annotations                                                                              | Implemented                                                                                                                                                      | §5b, Extensions section |
-| Execution policy (scheduler/fallback)                                                          | Implemented                                                                                                                                                      | §9.4, §6.3              |
-| AOT MIR cache (verified physical MIR artifacts)                                                | Implemented                                                                                                                                                      | §10.4                   |
-| AOT native code generation                                                                     | Implemented — adapter required (backend step beyond MIR)                                                                                                         | §10.4                   |
-| AOT artifact signing / secure loader                                                           | Stubbed — `serialize()` write-only; no deserialize/parse; SEC checks are placeholders                                                                            | §10.4                   |
-| GPU analysis / annotation routing                                                              | Implemented                                                                                                                                                      | §6.3                    |
-| GPU code emission (SPIR-V)                                                                     | Implemented                                                                                                                                                      | §6.3                    |
-| GPU dispatch                                                                                   | Implemented — adapter required; Vulkan-gated (`LITHE_VULKAN_BACKEND_AVAILABLE`)                                                                                  | §6.3                    |
-| Metal GPU backend                                                                              | Implemented — optional native Metal provider over the shared HL-MIR device plan                                                                                | §6.3                    |
-| SIMD analysis / annotation routing                                                             | Implemented                                                                                                                                                      | §6.3                    |
-| SIMD execution backend                                                                         | Implemented — Highway (`lithe_codegen_simd.hpp`)                                                                                                                 | §6.3                    |
-| Distribution analysis / policy                                                                 | Implemented — `allow_distributed` field; effects tracked                                                                                                         | §6.3                    |
-| Distribution execution backend                                                                 | Implemented — host/plugin boundary only (metadata; no in-tree remote runtime)                                                                                    | §6.3                    |
-| Coroutine analysis/planning (`spawn`/`await`, `crank_future<T>`)                               | Implemented                                                                                                                                                      | §7                      |
-| Coroutine backends                                                                             | Implemented — `InlineBackend`, `JThreadBackend`; async `CoroutineBackend` planned                                                                                | §7                      |
-| Futures runtime                                                                                | Stubbed — eager-inline (`future.hpp`)                                                                                                                            | §7                      |
-| Structured concurrency (task scopes, cancellation, deadlines)                                  | Not available in grammar — host C++ APIs only                                                                                                                    | §7                      |
-| Multi-resource transactions                                                                    | Parse-only in v1 — syntax accepted; sema enforces single-resource (`CRANK-TX-002`)                                                                                | §7c                     |
-| Nested transactions / savepoints                                                               | Host C++ APIs only — not in grammar                                                                                                                              | §7c                     |
-| Transactional collections `TxMap`/`TxSet`/`TxQueue`/`TxLog`                                    | Implemented — `tx_collections.hpp`                                                                                                                               | §12                     |
-| Transactional counter `TxCounter<T>`                                                           | Implemented — `tx_collections.hpp`                                                                                                                               | §12.2                   |
-| Associated types in generics                                                                   | Parse + sema coverage — lowering/backend integration remains scoped to supported v1 generic paths                                                                  | §v2.1                   |
-| Generic modules                                                                                | Implemented (frontend + sema) — runtime/backend behavior follows current monomorphized module paths                                                               | §v2.3                   |
-| Const-generic arithmetic                                                                       | Partial in v1 — literal/parameter forms implemented; arithmetic forms are reserved for v2                                                                          | §8                      |
-| Controlled specialization                                                                      | Implemented                                                                                                                                                      | §8                      |
-| Reflection + generated adapters                                                                | Implemented — program-built descriptors                                                                                                                          | §16                     |
-| Runtime debugging (data model)                                                                 | Implemented                                                                                                                                                      | Debugging section       |
-| Runtime debugging (stepping backend)                                                           | Stubbed — event/hook vocabulary defined; live pause/step not wired                                                                                               | Debugging section       |
+| Feature                                                                                | Status                                                                                                                                                           | §ref                    |
+|----------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
+| Scalar (straight-line) execution                                                       | Implemented                                                                                                                                                      | §10.2                   |
+| CFG interpretation (branches, loops, match, early return, defer, guards, transactions) | Implemented — `branch`/`branch_cond` interpreted; loop-carried scalar results are pending                                                                        | §10.2                   |
+| Parallel for/reduce/map                                                                | Implemented — lowers to Pravaha                                                                                                                                  | §6.2                    |
+| spawn/await                                                                            | Implemented                                                                                                                                                      | §7                      |
+| Transactions (compile-time checks)                                                     | Implemented                                                                                                                                                      | §7c                     |
+| Transactions (runtime/AOT lowering)                                                    | Implemented — `execute_tx.hpp`                                                                                                                                   | §7c                     |
+| Transaction state machine (`transaction_state`)                                        | Implemented — `transaction.hpp`                                                                                                                                  | §3.1                    |
+| Transaction runtime context (`transaction_context`)                                    | Implemented — `transaction.hpp`                                                                                                                                  | §3.2                    |
+| Transaction result type `Result[CommitReport, TxError]`                                | Implemented — `transaction_tag` typing rule in `sema_types.hpp` (fresh var; Result wrapper resolved in module 5)                                                 | §2.1                    |
+| `abort(error)` typing — Never result in tx body                                        | Implemented — `tx_abort_tag` typing rule in `sema_types.hpp`                                                                                                     | §2.3                    |
+| `yield expr` typing — propagates T to enclosing tx                                     | Implemented — `tx_yield_tag` typing rule in `sema_types.hpp`; runtime `body_value` in `tx_runtime_result` via `tx_evaluator::on_yield`                           | §2.2                    |
+| `FromTxError` error conversion concept                                                 | Implemented — `transaction.hpp`                                                                                                                                  | §5.2                    |
+| Typed error discriminant (`TxErrorKind`)                                               | Implemented — `transaction.hpp`                                                                                                                                  | §5.1                    |
+| Resource capability checker                                                            | Implemented — `resource_capability_checker` in `transaction.hpp`                                                                                                 | §6.3                    |
+| `read_committed` isolation level                                                       | Implemented — `medha::isolation::read_committed`; `transaction_isolation` parser production updated                                                              | §8.1                    |
+| Retry policy with backoff (`retry_policy`, `backoff_kind`)                             | Implemented — `transaction.hpp`                                                                                                                                  | §10.3                   |
+| Read-your-writes staging (§7.1)                                                        | Implemented — `detail::tx_staged_write_set` in `execute_tx.hpp`; staged writes visible to in-body reads; `old_snapshot` bypasses                                 | §7.1, §7.3              |
+| Durability levels (`durability_level`)                                                 | Implemented — `durability_level` enum in `transaction.hpp`; `CrankTransactionOptions::durability`; `CrankCommitReport::durability`; `tx_plan_record::durability` | §14.1                   |
+| Commit report lookup (`commit_report_store`, `lookup_commit_report`)                   | Implemented — `transaction.hpp`                                                                                                                                  | §15.3                   |
+| Observability event enum (`transaction_event_kind`)                                    | Implemented — `transaction.hpp`                                                                                                                                  | §16.1                   |
+| WAL record kinds (`log_record_kind`)                                                   | Implemented — `transaction.hpp`                                                                                                                                  | §14.2                   |
+| Full commit report fields                                                              | Implemented — `CrankCommitReport` in `transaction.hpp`; adds `transaction_id` and `durability`                                                                   | §15.1                   |
+| `TransactionParticipant` concept                                                       | Implemented — `transaction.hpp`                                                                                                                                  | §13.2                   |
+| In-process two-phase commit (`crank_coordinator_2pc`)                                  | Implemented — `transaction.hpp`                                                                                                                                  | §13.3–§13.4             |
+| Generics + monomorphization                                                            | Implemented                                                                                                                                                      | §8                      |
+| Typed annotations                                                                      | Implemented                                                                                                                                                      | §5b, Extensions section |
+| Execution policy (scheduler/fallback)                                                  | Implemented                                                                                                                                                      | §9.4, §6.3              |
+| AOT MIR cache (verified physical MIR artifacts)                                        | Implemented                                                                                                                                                      | §10.4                   |
+| AOT native code generation                                                             | Implemented — adapter required (backend step beyond MIR)                                                                                                         | §10.4                   |
+| AOT artifact signing / secure loader                                                   | Stubbed — `serialize()` write-only; no deserialize/parse; SEC checks are placeholders                                                                            | §10.4                   |
+| GPU analysis / annotation routing                                                      | Implemented                                                                                                                                                      | §6.3                    |
+| GPU code emission (SPIR-V)                                                             | Implemented                                                                                                                                                      | §6.3                    |
+| GPU dispatch                                                                           | Implemented — adapter required; Vulkan-gated (`LITHE_VULKAN_BACKEND_AVAILABLE`)                                                                                  | §6.3                    |
+| Metal GPU backend                                                                      | Implemented — optional native Metal provider over the shared HL-MIR device plan                                                                                  | §6.3                    |
+| SIMD analysis / annotation routing                                                     | Implemented                                                                                                                                                      | §6.3                    |
+| SIMD execution backend                                                                 | Implemented — Highway (`lithe_codegen_simd.hpp`)                                                                                                                 | §6.3                    |
+| Distribution analysis / policy                                                         | Implemented — `allow_distributed` field; effects tracked                                                                                                         | §6.3                    |
+| Distribution execution backend                                                         | Implemented — host/plugin boundary only (metadata; no in-tree remote runtime)                                                                                    | §6.3                    |
+| Coroutine analysis/planning (`spawn`/`await`, `crank_future<T>`)                       | Implemented                                                                                                                                                      | §7                      |
+| Coroutine backends                                                                     | Implemented — `InlineBackend`, `JThreadBackend`; async `CoroutineBackend` planned                                                                                | §7                      |
+| Futures runtime                                                                        | Stubbed — eager-inline (`future.hpp`)                                                                                                                            | §7                      |
+| Structured concurrency (task scopes, cancellation, deadlines)                          | Not available in grammar — host C++ APIs only                                                                                                                    | §7                      |
+| Multi-resource transactions                                                            | Parse-only in v1 — syntax accepted; sema enforces single-resource (`CRANK-TX-002`)                                                                               | §7c                     |
+| Nested transactions / savepoints                                                       | Host C++ APIs only — not in grammar                                                                                                                              | §7c                     |
+| Transactional collections `TxMap`/`TxSet`/`TxQueue`/`TxLog`                            | Implemented — `tx_collections.hpp`                                                                                                                               | §12                     |
+| Transactional counter `TxCounter<T>`                                                   | Implemented — `tx_collections.hpp`                                                                                                                               | §12.2                   |
+| Associated types in generics                                                           | Parse + sema coverage — lowering/backend integration remains scoped to supported v1 generic paths                                                                | §v2.1                   |
+| Generic modules                                                                        | Implemented (frontend + sema) — runtime/backend behavior follows current monomorphized module paths                                                              | §v2.3                   |
+| Const-generic arithmetic                                                               | Partial in v1 — literal/parameter forms implemented; arithmetic forms are reserved for v2                                                                        | §8                      |
+| Controlled specialization                                                              | Implemented                                                                                                                                                      | §8                      |
+| Reflection + generated adapters                                                        | Implemented — program-built descriptors                                                                                                                          | §16                     |
+| Runtime debugging (data model)                                                         | Implemented                                                                                                                                                      | Debugging section       |
+| Runtime debugging (stepping backend)                                                   | Stubbed — event/hook vocabulary defined; live pause/step not wired                                                                                               | Debugging section       |
 
 ---
 
@@ -1498,8 +1508,8 @@ downstream dumps.
 - `exists i in 0..n: xs[i] == target` — existential quantification with ranged binder (new form)
 
 Ranged binders desugar to guarded typed quantifiers:
-`forall i in a..b: p` ≡ `forall i: <IntType> . (a <= i && i < b) -> p`.
-Both forms produce `quantifier_tag` (id 1021); `quant_bound_kind` distinguishes `typed` from `ranged`.
+`forall i in a..b: p` ≡ `forall i: <IntType> . (a <= i && i < b) -> p`. Both forms produce `quantifier_tag` (id 1021);
+`quant_bound_kind` distinguishes `typed` from `ranged`.
 
 ## JSON Dump API
 
@@ -1618,9 +1628,9 @@ Predeclared language types for transactional memory:
 
 ## Inference vs Public Boundary
 
-- **Locals** (`let`/`var` within fn body): HM inference via `vakya::types::infer`.
-  Numeric literals are *untyped constants* unified against their declared target type.
-  Silent narrowing never occurs — a constant that does not fit its target is a diagnostic.
+- **Locals** (`let`/`var` within fn body): HM inference via `vakya::types::infer`. Numeric literals are *untyped
+  constants* unified against their declared target type. Silent narrowing never occurs — a constant that does not fit
+  its target is a diagnostic.
 - **Exported declarations** (functions, types, constants visible outside the module):
     - All parameters and return types require explicit type annotations (except bare `self` receiver).
     - Missing annotation → diagnostic (`CRANK-TYPE-001`).
@@ -1694,12 +1704,10 @@ Import name → path mapping: `import "math.vector"` → `<base>/math/vector.cra
 `module.crank` = package root. Content hash is FNV-1a 64-bit over source bytes — stable across identical source, drives
 incremental rebuild and AOT keys.
 
-After resolution, captured imports run through the `lang::import_graph` pipeline
-(`context::resolve_imports` / `engine::load`): circular (`LANG-IMP-003`), version
-(`LANG-IMP-004`) and capability (`LANG-IMP-005`) checks, then exported-symbol flow from
-each importee into the importer. The dependency graph additionally exposes `cycle_nodes()`,
-`find_dependents()` and `find_dependencies()` for diagnostics; `topo_order()` (importees
-first) drives compile order.
+After resolution, captured imports run through the `lang::import_graph` pipeline (`context::resolve_imports` /
+`engine::load`): circular (`LANG-IMP-003`), version (`LANG-IMP-004`) and capability (`LANG-IMP-005`) checks, then
+exported-symbol flow from each importee into the importer. The dependency graph additionally exposes `cycle_nodes()`,
+`find_dependents()` and `find_dependencies()` for diagnostics; `topo_order()` (importees first) drives compile order.
 
 ## Host Embedding (no macros)
 
@@ -1714,8 +1722,8 @@ crank::context ctx;
 ctx.register_function<"math.dot", dot>();
 ```
 
-Non-capturing lambdas and free functions bind through a compile-time trampoline
-(arity ≤ 8). Capturing callables use the explicit form:
+Non-capturing lambdas and free functions bind through a compile-time trampoline (arity ≤ 8). Capturing callables use the
+explicit form:
 
 ```cpp
 ctx.register_function("math.dot", 2, [capture](std::span<const std::any> args) -> std::any {
@@ -1838,8 +1846,8 @@ struct SafetyError { kind: safety_kind, at: source_span }
 
 ### v1 Frontend Diagnostic Codes
 
-Stable codes emitted by the resolve / type / effect / safety passes. Each code
-is permanent — never reused for a second meaning. Produced by the `to_code`
+Stable codes emitted by the resolve / type / effect / safety passes. Each code is permanent — never reused for a second
+meaning. Produced by the `to_code`
 mappings on `resolve_diagnostic`, `effect_diagnostic`, and `safety_diagnostic_kind`.
 
 | Code             | Pass    | Meaning                                                                                                        |
@@ -2017,13 +2025,13 @@ auto result = crank::o3_profile{}(expr);
 
 Input: per-function descriptor — scalar SSA, loop bounds, tensors, defer sites, exit edges, safety policy.
 
-| Step                                  | Output                                                       |
-|---------------------------------------|--------------------------------------------------------------|
-| Loop → `structured_for`               | `is_parallel` flag from `loop_bounds_info`                   |
-| Scalar SSA → `constant` / `add` / `sub` / `mul` / `div` | Explicit operands/results; optional scalar `ret` |
-| Tensor → `memref_load`/`memref_store` | Row-major `memref_type` derived from `tensor_info`           |
-| Defer sites → `crank_defer_list`      | Per-block LIFO cleanup list                                  |
-| Exit edges → `crank_exit_edge`        | `controlled` edges carry LIFO defer list; `trap` edges don't |
+| Step                                                    | Output                                                       |
+|---------------------------------------------------------|--------------------------------------------------------------|
+| Loop → `structured_for`                                 | `is_parallel` flag from `loop_bounds_info`                   |
+| Scalar SSA → `constant` / `add` / `sub` / `mul` / `div` | Explicit operands/results; optional scalar `ret`             |
+| Tensor → `memref_load`/`memref_store`                   | Row-major `memref_type` derived from `tensor_info`           |
+| Defer sites → `crank_defer_list`                        | Per-block LIFO cleanup list                                  |
+| Exit edges → `crank_exit_edge`                          | `controlled` edges carry LIFO defer list; `trap` edges don't |
 
 ### `defer` Semantics
 
@@ -2043,13 +2051,11 @@ lower_to_hl → lower_hl_result
 
 **`execute_via_interpreter(hl_res, args, opts)`** — always-available path, zero external deps.
 
-**Value-carrying subset.** `lower_input::scalar` is the current executable
-integer SSA contract: constants and `add`/`sub`/`mul`/`div` retain explicit
-operands, results, and an optional return value through physical MIR. A rank-1
-integer reduction carries one accumulator through structured-loop block
-arguments and returns its final value through `region_yield`. Nested and
-multi-accumulator reductions remain pending. Device reduction lowering is a
-separate workgroup ABI and currently falls back to CPU execution.
+**Value-carrying subset.** `lower_input::scalar` is the current executable integer SSA contract: constants and `add`/
+`sub`/`mul`/`div` retain explicit operands, results, and an optional return value through physical MIR. A rank-1 integer
+reduction carries one accumulator through structured-loop block arguments and returns its final value through
+`region_yield`. Nested and multi-accumulator reductions remain pending. Device reduction lowering is a separate
+workgroup ABI and currently falls back to CPU execution.
 
 **`execute_with_auto_fallback(hl_res, args, opts)`** — capability-aware; tries `opts.primary_backend_name`, falls back
 to interpreter + diagnostic trace.
@@ -2144,8 +2150,8 @@ hint fields. The `execution_preference` enum is crank-local until G-LIT-4 (a) la
 **Wiring (perf-L1 C-1):** `@parallel/@simd/@gpu` attributes are parsed to `crank_exec_attr` list, merged via
 `merge_exec_hints`, and fed directly to `construct_plan(..., hints)` when calling `execute_planned`. The planner
 consumes them natively — no grammar change required. Force policy: `required=true` + unavailable backend →
-`hard_requirement_unmet_diagnostic` (CRANK-E-EXEC-001); soft `preference=strong` unmet → `soft_fallback_note` (
-CRANK-I-EXEC-002) + interpreter fallback.
+`hard_requirement_unmet_diagnostic` (CRANK-E-EXEC-001); soft `preference=strong` unmet → `soft_fallback_note`
+(CRANK-I-EXEC-002) + interpreter fallback.
 
 ## Pravaha Extraction + `spawn`/`await`
 
@@ -2237,18 +2243,17 @@ Hetero priority: **Metal > Vulkan > Host SIMD** (§6.3). Every backend fallback 
 
 ### Compiler-phase acceleration (§M.parallel)
 
-`engine.hpp` accelerates **compiler phases** (parsing, batch module loading) using the
-same Pravaha + Kosha stack. These types live in `engine.hpp` (after `frontend::parse` and
+`engine.hpp` accelerates **compiler phases** (parsing, batch module loading) using the same Pravaha + Kosha stack. These
+types live in `engine.hpp` (after `frontend::parse` and
 `crank::context` are fully defined) rather than `parallel.hpp` — the include chain requires
 `frontend::parse_result` to be visible, which it is only after `frontend.hpp` completes.
 
 #### `module_parse_info` + `module_parse_cache`
 
-`module_parse_info{package_name, imports, parse_ok}` captures the lightweight metadata
-a parse produces (package clause + import list). `module_parse_cache<S>` is a
-`kosha::ShardedLRUCache<content_hash, module_parse_info, S>` (thread-safe, S shards,
-default S=8). On cache hit the full `frontend::parse` is skipped — unchanged modules cost
-only a hash lookup on incremental rebuilds.
+`module_parse_info{package_name, imports, parse_ok}` captures the lightweight metadata a parse produces (package
+clause + import list). `module_parse_cache<S>` is a
+`kosha::ShardedLRUCache<content_hash, module_parse_info, S>` (thread-safe, S shards, default S=8). On cache hit the full
+`frontend::parse` is skipped — unchanged modules cost only a hash lookup on incremental rebuilds.
 
 #### `parse_modules_parallel`
 
@@ -2275,9 +2280,9 @@ auto result = crank::batch_load_modules(order, source_provider, ctx, &cache);
 // dep graph is updated with add_import for each successfully parsed module.
 ```
 
-Groups modules into **dependency waves** (modules whose importees are all already done in
-the batch), then parses each wave in parallel. Preserves compile order across wave
-boundaries. Seeded module dep-graph edges (`ctx.dep_graph().add_import`) after each wave.
+Groups modules into **dependency waves** (modules whose importees are all already done in the batch), then parses each
+wave in parallel. Preserves compile order across wave boundaries. Seeded module dep-graph edges
+(`ctx.dep_graph().add_import`) after each wave.
 
 ## AOT Cache
 
@@ -2315,7 +2320,7 @@ An AOT artifact is a *compilation product* (lowered + verified physical MIR), th
 > **Performance note.** When asmjit is available (`LITHE_HAS_ASMJIT`), `compile_and_cache` now routes through the native
 > JIT path. CFG functions (counted loops such as `sum`/`harmonic`) return a correct scalar via the native path. On the
 > interpreter-only fallback, CFG functions still return a value because the interpreter follows branches. See
-`docs/lithe/lithe.md#execution-model` for the execution-tier breakdown (322× → ~1× speedup expected for hot counted
+> `docs/lithe/lithe.md#execution-model` for the execution-tier breakdown (322× → ~1× speedup expected for hot counted
 > loops).
 
 `aot_cache_result.diagnostics` holds fatal compile diagnostics only; `aot_cache_result.notes` holds non-fatal runtime
@@ -2393,8 +2398,8 @@ conformance defect and will produce `CRANK-AOT-SEC-002`.
 **Signature encoding:**
 
 - **Ed25519**: raw 64-byte RFC 8032 signature (`sig_len = 64`).
-- **ECDSA P-256**: DER-encoded `SEQUENCE { INTEGER r, INTEGER s }`, no padding; `sig_len` is its actual DER length (
-  70–72 typical). The length prefix, not a fixed offset, delimits it.
+- **ECDSA P-256**: DER-encoded `SEQUENCE { INTEGER r, INTEGER s }`, no padding; `sig_len` is its actual DER length
+  (70–72 typical). The length prefix, not a fixed offset, delimits it.
 
 **Key rotation:** `key_identity` is an audit string (e.g. `"org.example.signing-key-2025-01"`). Rotate keys by deploying
 a new `aot_security_policy` with updated `public_key` and `key_identity`. Old artifacts signed with the previous key
@@ -2794,8 +2799,8 @@ committed; cancellation cannot reverse it. A partial commit leaves the result `i
 Scope: single-process/single-trust-domain. Distributed consensus is a non-goal (§20).
 
 Every execution request finishes in exactly one **terminal state**. `execution_status`
-has 7 canonical values, plus 4 legacy alias enumerators (same underlying value, kept
-so existing callers of `::ok` compile unchanged):
+has 7 canonical values, plus 4 legacy alias enumerators (same underlying value, kept so existing callers of `::ok`
+compile unchanged):
 
 | Canonical             | Value | Legacy alias                       |
 |-----------------------|-------|------------------------------------|
@@ -2808,10 +2813,10 @@ so existing callers of `::ok` compile unchanged):
 | `invalid_plan`        | 6     | —                                  |
 
 `execution_result<T>` makes impossible states unrepresentable via the `make_*`
-factories: a result carries a value **iff** it is `completed`; otherwise it carries a
-typed `execution_error` (`kind`, `span`, `fn_name`, `ir_op`, `backend_id`, `plan_id`,
-`message`, nested errors). `profiling_report` is pay-for-use — `record()` is a no-op
-with no allocation when `enabled == false`.
+factories: a result carries a value **iff** it is `completed`; otherwise it carries a typed `execution_error` (`kind`,
+`span`, `fn_name`, `ir_op`, `backend_id`, `plan_id`,
+`message`, nested errors). `profiling_report` is pay-for-use — `record()` is a no-op with no allocation when
+`enabled == false`.
 
 ```cpp
 auto r = make_completed<std::int64_t>(42);   // completed, value present
@@ -2822,88 +2827,80 @@ auto t = make_timed_out<T>("fn");            // status = timed_out
 
 ## Physical-MIR Verifier Gate (`verify_mir.hpp`)
 
-`verify_crank_mir(fn, expects_value)` wraps lithe's `verify_physical_mir` and adds the
-crank-level checks it does not perform, then mints a **`verified_mir`** token. Only a
-`verified_mir` may be passed to a backend/plan (private ctor + friend; a default token
-is invalid). It is a **non-owning view** — the `physical_mir_function` must outlive it.
+`verify_crank_mir(fn, expects_value)` wraps lithe's `verify_physical_mir` and adds the crank-level checks it does not
+perform, then mints a **`verified_mir`** token. Only a
+`verified_mir` may be passed to a backend/plan (private ctor + friend; a default token is invalid). It is a **non-owning
+view** — the `physical_mir_function` must outlive it.
 
-Adds beyond lithe's structural pass: (1) a reachable block that ends without a
-terminator → `verification_failed` (`path_without_return_or_trap`); (2) a
-value-returning function whose `ret` carries no value operand → `missing_return_value`.
-Region-legality hooks (GPU/SIMD/defer) are named seams for future passes.
+Adds beyond lithe's structural pass: (1) a reachable block that ends without a terminator → `verification_failed`
+(`path_without_return_or_trap`); (2) a value-returning function whose `ret` carries no value operand →
+`missing_return_value`. Region-legality hooks (GPU/SIMD/defer) are named seams for future passes.
 
 ## Capability Discovery (`capability.hpp`)
 
-`discover_backends(execution_options)` returns a policy-gated, deterministic,
-fingerprint-cached `capability_set`. The scalar interpreter is always present (semantic
-reference); `allow_simd`/`allow_threads`/`allow_gpu` add their descriptors, and
-`backend_policy::inline_only`/`threaded_only` narrow the offered set. Static adapters
-match the vtable-free `ExecutionBackend` concept; a type-erased boundary is reserved
-for plugins. GPU is offered only when a device is actually present
-(`gpu_backend::available()`), keeping discovery honest.
+`discover_backends(execution_options)` returns a policy-gated, deterministic, fingerprint-cached `capability_set`. The
+scalar interpreter is always present (semantic reference); `allow_simd`/`allow_threads`/`allow_gpu` add their
+descriptors, and
+`backend_policy::inline_only`/`threaded_only` narrow the offered set. Static adapters match the vtable-free
+`ExecutionBackend` concept; a type-erased boundary is reserved for plugins. GPU is offered only when a device is
+actually present (`gpu_backend::available()`), keeping discovery honest.
 
 ## SIMD Legality (`simd_legality.hpp`)
 
 `analyze_simd_legality(loop, width)` classifies a counted loop's memory accesses into a
 `dependence_tier` (`distinct_base` → `non_overlapping` → `affine_provable` →
-`needs_runtime_guard` → `illegal`) using an affine `base + coeff*iv` subscript model.
-Distinct base pointers cannot alias; a same-base `a[i]` vs `a[i+k]` write is a
-loop-carried dependence (illegal); differing strides need a runtime alias guard.
-Reductions are recognized via `parallel.hpp`'s `reduction_op` (all associative → legal).
-It also sizes the vector body vs. scalar tail:
+`needs_runtime_guard` → `illegal`) using an affine `base + coeff*iv` subscript model. Distinct base pointers cannot
+alias; a same-base `a[i]` vs `a[i+k]` write is a loop-carried dependence (illegal); differing strides need a runtime
+alias guard. Reductions are recognized via `parallel.hpp`'s `reduction_op` (all associative → legal). It also sizes the
+vector body vs. scalar tail:
 `vector_trip = floor((end−begin)/W)·W`, `scalar_tail = remainder`.
 
 ## GPU Residency, Transfers, Events (`gpu_memory.hpp`)
 
 A pure data model of device buffers (`address_space`, `residency_state`,
-`buffer_access`) layered over `gpu_backend.hpp`. `plan_transfers(region)` produces a
-dependency-ordered `transfer_plan`: upload a device-read buffer only when the host copy
-is current; download a device-written buffer and mark the plan's
-`visible_device_writes`. `synchronize(plan, allow_replay)` is the **replay-safe fallback
-gate** — once visible device writes have committed, it refuses a re-run with
+`buffer_access`) layered over `gpu_backend.hpp`. `plan_transfers(region)` produces a dependency-ordered `transfer_plan`:
+upload a device-read buffer only when the host copy is current; download a device-written buffer and mark the plan's
+`visible_device_writes`. `synchronize(plan, allow_replay)` is the **replay-safe fallback gate** — once visible device
+writes have committed, it refuses a re-run with
 `unsafe_fallback_after_effects` rather than double-applying effects.
 
 ## Cancellation, Deadlines, Task FSM (`cancellation.hpp`)
 
-`cancellation_token` observes a lock-free `cancellation_state` tree: parent cancellation
-propagates to children, but a child **never** cancels its parent (§13.2).
+`cancellation_token` observes a lock-free `cancellation_state` tree: parent cancellation propagates to children, but a
+child **never** cancels its parent (§13.2).
 `effective_deadline(parent, local)` composes deadlines by taking the tighter (min).
-`check_interruption(token, deadline)` is the single poll a running task issues — it
-reports cancellation first, then deadline expiry, mapping onto `cancelled` / `timed_out`.
-The `task_status` FSM (`created → scheduled → running → terminal`, with
-cancellation/deadline reachable from any live state) is enforced by `task_state`'s
-CAS-guarded `transition`. `task_scope` now carries a `cancellation_token` (its legacy
-`cancelled_` bool stays in sync), and `deadline_scope` composes with an enclosing
-deadline.
+`check_interruption(token, deadline)` is the single poll a running task issues — it reports cancellation first, then
+deadline expiry, mapping onto `cancelled` / `timed_out`. The `task_status` FSM
+(`created → scheduled → running → terminal`, with cancellation/deadline reachable from any live state) is enforced by
+`task_state`'s CAS-guarded `transition`. `task_scope` now carries a `cancellation_token` (its legacy
+`cancelled_` bool stays in sync), and `deadline_scope` composes with an enclosing deadline.
 
 ## Plan Construction + Execution (`plan.hpp`)
 
 `construct_plan(verified_mir, opts, hints, transfers)` discovers backends, generates one
-`backend_candidate` per backend, and ranks them: **required > preferred > advisory**,
-then lowest cost, then determinism. `from_preference` bridges `exec_hint.hpp`'s
-`execution_preference` + `required` flag onto a `requirement_strength` (it does not
-redefine that enum). A scalar fallback is attached unless a required non-scalar backend
-forbids it. Two conflicting `required` hints → `plan_construction_failed`
-(`invalid_plan`); a required-but-unavailable backend → `required_backend_illegal` (no
-silent fallback). `execution_plan_record` / `to_record` give dump.hpp a serializable
-mirror.
+`backend_candidate` per backend, and ranks them: **required > preferred > advisory**, then lowest cost, then
+determinism. `from_preference` bridges `exec_hint.hpp`'s
+`execution_preference` + `required` flag onto a `requirement_strength` (it does not redefine that enum). A scalar
+fallback is attached unless a required non-scalar backend forbids it. Two conflicting `required` hints →
+`plan_construction_failed`
+(`invalid_plan`); a required-but-unavailable backend → `required_backend_illegal` (no silent fallback).
+`execution_plan_record` / `to_record` give dump.hpp a serializable mirror.
 
-`execute_plan<T>(plan, run, token, deadline)` runs the selected candidate through a
-caller-supplied `CandidateExecutor` and, on failure, walks the fallback chain — **unless**
+`execute_plan<T>(plan, run, token, deadline)` runs the selected candidate through a caller-supplied `CandidateExecutor`
+and, on failure, walks the fallback chain — **unless**
 the failed candidate committed visible device writes, in which case it returns
 `unsafe_fallback_after_effects`. Cancellation/deadline are polled before each attempt.
 
 ## Coroutine Backend (`coroutine.hpp`)
 
 `crank_task<T>` is a lazily-started C++20 coroutine carrying a typed
-`execution_result<T>`. It binds a `cancellation_token` + optional deadline; a
-cancelled/expired task yields `cancelled`/`timed_out`, an escaped exception becomes
-`task_panicked`. Suspension is scheduler-driven (the `Scheduler` concept; pravaha pools
-wrap via a thin adapter; `inline_scheduler` is the dependency-free default) — a ready
-handle is never resumed inline under a crank-held lock. `co_await`ing a task uses
-symmetric transfer and yields the inner result. `host.hpp` gains a `blocking_class`
-(`non_blocking` / `potentially_blocking` / `async` / `thread_affine`) so the async
-planner can place host calls correctly.
+`execution_result<T>`. It binds a `cancellation_token` + optional deadline; a cancelled/expired task yields `cancelled`/
+`timed_out`, an escaped exception becomes
+`task_panicked`. Suspension is scheduler-driven (the `Scheduler` concept; pravaha pools wrap via a thin adapter;
+`inline_scheduler` is the dependency-free default) — a ready handle is never resumed inline under a crank-held lock.
+`co_await`ing a task uses symmetric transfer and yields the inner result. `host.hpp` gains a `blocking_class`
+(`non_blocking` / `potentially_blocking` / `async` / `thread_affine`) so the async planner can place host calls
+correctly.
 
 ## Stable Execution Diagnostic Codes (§15.4)
 
@@ -2928,8 +2925,7 @@ planner can place host calls correctly.
 | `CRANK-E-EXEC-026` | lowering failed                       |
 | `CRANK-E-EXEC-027` | resource exhausted                    |
 
-(`CRANK-E-EXEC-001`/`002` are reserved by `exec_hint.hpp` for hard-requirement-unmet /
-soft-fallback.)
+(`CRANK-E-EXEC-001`/`002` are reserved by `exec_hint.hpp` for hard-requirement-unmet / soft-fallback.)
 
 ---
 
@@ -2937,8 +2933,7 @@ soft-fallback.)
 
 ## Overview
 
-Transactions let Crank programs express multi-key, serializable operations on transactional
-resources. Ownership split:
+Transactions let Crank programs express multi-key, serializable operations on transactional resources. Ownership split:
 
 | Responsibility                                      | Owner                      |
 |-----------------------------------------------------|----------------------------|
@@ -2965,8 +2960,8 @@ Each Crank language type maps 1:1 to a Medha C++ type:
 | `PartialCommit`      | `medha::partial_commit_policy`                   | enum              |
 | `ProofStatus`        | `medha::proof_status`                            | enum              |
 
-`TxError` and `CommitReport` expose named accessors (`status()`, `message()`, `attempts()`, etc.).
-Crank never re-invents transaction semantics; these are all pure mappings.
+`TxError` and `CommitReport` expose named accessors (`status()`, `message()`, `attempts()`, etc.). Crank never
+re-invents transaction semantics; these are all pure mappings.
 
 ### Defaults
 
@@ -2988,19 +2983,17 @@ let report = transaction { … }        // binds committed report
 transaction { … }                     // bare statement; discards report (no must-use)
 ```
 
-**Why an explicit keyword?** Atomicity, isolation, conflict resolution, and rollback cannot be
-inferred from ordinary reads and writes — they depend on participant capabilities, concurrency
-policies, and failure semantics that must be stated at the call site. The `transaction` keyword
-makes these properties unambiguous to both the compiler and the reader.
+**Why an explicit keyword?** Atomicity, isolation, conflict resolution, and rollback cannot be inferred from ordinary
+reads and writes — they depend on participant capabilities, concurrency policies, and failure semantics that must be
+stated at the call site. The `transaction` keyword makes these properties unambiguous to both the compiler and the
+reader.
 
-`transaction { … }` is an **expression** whose value is the commit report
-(`CrankCommitReport`). It does **not** yield the programmer's `return` value:
-a `return` inside the body triggers rollback of the uncommitted writes, and the
-transaction expression still evaluates to a report. On a failed commit the
-runtime does not return a `Result.Err`/`TxError` value — it surfaces the failure
-as a diagnostic (`CRANK-TX-RUNTIME-001` / `CRANK-TX-RUNTIME-002` from
-`execute_tx.hpp`). Model typed error propagation explicitly if you need it (e.g.
-have the body return `Result[T, E]`).
+`transaction { … }` is an **expression** whose value is the commit report (`CrankCommitReport`). It does **not** yield
+the programmer's `return` value:
+a `return` inside the body triggers rollback of the uncommitted writes, and the transaction expression still evaluates
+to a report. On a failed commit the runtime does not return a `Result.Err`/`TxError` value — it surfaces the failure as
+a diagnostic (`CRANK-TX-RUNTIME-001` / `CRANK-TX-RUNTIME-002` from
+`execute_tx.hpp`). Model typed error propagation explicitly if you need it (e.g. have the body return `Result[T, E]`).
 
 ## Tx-Indexing Lowering
 
@@ -3015,13 +3008,13 @@ Inside a `transaction` block, resource accesses lower to Medha ops:
 
 - Reads observe **read-your-writes**: write set checked first, then resource.
 - `load` returns a **copy** — crank binds the copy, never a borrow.
-- `old(expr)` in a tx body = value at transaction entry (Medha snapshot).
-  This is the second legal `old` context besides `ensures` (module 3).
+- `old(expr)` in a tx body = value at transaction entry (Medha snapshot). This is the second legal `old` context besides
+  `ensures` (module 3).
 
 ## Compile-Time Policy Checks
 
-All checks happen in semantic analysis **before lowering**. A failed check is a
-compile diagnostic; no illegal combination ever reaches runtime.
+All checks happen in semantic analysis **before lowering**. A failed check is a compile diagnostic; no illegal
+combination ever reaches runtime.
 
 | Rule                        | Diagnostic          | Condition                                                                           |
 |-----------------------------|---------------------|-------------------------------------------------------------------------------------|
@@ -3040,8 +3033,8 @@ compile diagnostic; no illegal combination ever reaches runtime.
 A non-committed tx yields `TxError`. Resolution order:
 
 1. `fn -> Result[T, E: FromTxError]` → wraps as `Result.Err(E::from(TxError))`.
-2. Fn has `@on_safety_failure(trap|terminate|host_handler)` → uses that policy
-   (reuses module 3 `safety_kind::tx_failed` machinery).
+2. Fn has `@on_safety_failure(trap|terminate|host_handler)` → uses that policy (reuses module 3 `safety_kind::tx_failed`
+   machinery).
 3. Neither → `CRANK-TX-007` compile diagnostic.
 
 ### Early-Exit Semantics
@@ -3072,8 +3065,8 @@ diagnostic). The "await failure" row above applies when a future's result is con
 
 ### Cross-Resource Restriction
 
-`serializable` isolation touching >1 transactional resource is rejected (`CRANK-TX-002`).
-There is no cross-resource coordinator: multi-resource `transaction(coordinator=…)`
+`serializable` isolation touching >1 transactional resource is rejected (`CRANK-TX-002`). There is no cross-resource
+coordinator: multi-resource `transaction(coordinator=…)`
 syntax parses, but sema still enforces single-resource. Single-resource `serializable`
 and any-resource `snapshot` are both allowed.
 
@@ -3089,8 +3082,8 @@ Crank is stricter than Medha:
 
 - `await`/`spawn` inside a transaction → rejected.
 - Transaction nested under `@parallel` → rejected.
-- Same-thread nested `transaction` blocks → flattened (inherit parent retry/isolation).
-  GPU lowering of a tx body is also rejected.
+- Same-thread nested `transaction` blocks → flattened (inherit parent retry/isolation). GPU lowering of a tx body is
+  also rejected.
 
 ## Resource Registration
 
@@ -3127,16 +3120,15 @@ crank::extend_aot_key_with_resource<AccountStore>(key);
 Fields hashed per resource: `transactional`, `supports_snapshot`, `aba_safe`, `commit_protocol`,
 `value_trivially_copyable`, `value_move_only`, `resource_stages_values`, `supports_rollback`.
 
-`resource_stages_values` and `supports_rollback` currently only feed this AOT
-fingerprint — there is no dedicated compile diagnostic for a resource lacking
-staging or rollback capability. The only capability diagnostic wired today is
+`resource_stages_values` and `supports_rollback` currently only feed this AOT fingerprint — there is no dedicated
+compile diagnostic for a resource lacking staging or rollback capability. The only capability diagnostic wired today is
 `CRANK-TX-003` (a resource without `supports_snapshot` used under `old()`).
 
 The Medha **dialect version** is stamped into `enabled_features` bits [63:48]:
 
 - `distribution=none` = 1.
-- A new distribution dialect forces `enabled_features` to change → AOT cache miss → recompile.
-  Distributed mode is never silently reinterpreted.
+- A new distribution dialect forces `enabled_features` to change → AOT cache miss → recompile. Distributed mode is never
+  silently reinterpreted.
 
 ## Transaction JSON Dump
 
@@ -3166,13 +3158,13 @@ Build a `tx_plan_record` from a `tx_lowering_result` + `tx_policy_flags` via
 
 ## Overview
 
-Crank generics are monomorphized (one concrete Vākya subtree per instantiation) with
-explicit `trait`/`impl` conformance. No runtime dispatch in hot loops — witness objects
-only at explicit dynamic boundaries (host-erased values, plugin edges, forced erasure).
+Crank generics are monomorphized (one concrete Vākya subtree per instantiation) with explicit `trait`/`impl`
+conformance. No runtime dispatch in hot loops — witness objects only at explicit dynamic boundaries (host-erased values,
+plugin edges, forced erasure).
 
-G-VAK-6 fallback (b): the generic Vākya trait machinery is planned but not yet landed.
-Crank currently encodes bounds as `trait_set` bits and stores conformance in a crank-local side-table
-keyed by `structural_hash`. No Vākya framework change required.
+G-VAK-6 fallback (b): the generic Vākya trait machinery is planned but not yet landed. Crank currently encodes bounds as
+`trait_set` bits and stores conformance in a crank-local side-table keyed by `structural_hash`. No Vākya framework
+change required.
 
 ## Monomorphization Model
 
@@ -3186,16 +3178,14 @@ Generic Reduce[T: Monoid + ParallelSafe]
                  → distinct AOT cache key
 ```
 
-Trait calls are **statically resolved** (the selected `impl` is inlined at the call site).
-No runtime dictionary is emitted in a hot loop. Witness/table objects are only used at
-explicit dynamic boundaries.
+Trait calls are **statically resolved** (the selected `impl` is inlined at the call site). No runtime dictionary is
+emitted in a hot loop. Witness/table objects are only used at explicit dynamic boundaries.
 
 ## Trait/Impl Conformance
 
 ### Explicit only
 
-Conformance is **explicit** — no structural/implicit conformance.
-An `impl Trait for Type` must be declared somewhere.
+Conformance is **explicit** — no structural/implicit conformance. An `impl Trait for Type` must be declared somewhere.
 
 ```crank
 trait Monoid {
@@ -3221,8 +3211,8 @@ All bounds must be satisfied for the instantiation to succeed.
 
 ### Coherence / Orphan Rule (always enforced)
 
-`impl Trait for Type` is legal only when the **current module** owns the trait **or** owns the type.
-No overlapping impls for the same (trait, type) pair. Diagnostics:
+`impl Trait for Type` is legal only when the **current module** owns the trait **or** owns the type. No overlapping
+impls for the same (trait, type) pair. Diagnostics:
 
 | Diagnostic                  | Code            | Condition                                                                                            |
 |-----------------------------|-----------------|------------------------------------------------------------------------------------------------------|
@@ -3248,8 +3238,8 @@ All bounds encode as `trait_set` bits (bit per `bound_kind`):
 
 ### Callable Bounds
 
-`Fn(T) -> U` is a bound, not a concrete type. Arity and signature are stored
-in `callable_sig` inside `impl_record`. An effectful callable + `GpuCompatible` →
+`Fn(T) -> U` is a bound, not a concrete type. Arity and signature are stored in `callable_sig` inside `impl_record`. An
+effectful callable + `GpuCompatible` →
 `CRANK-GEN-GPU` diagnostic (effectful functions cannot lower to GPU).
 
 ### Algebraic Bounds (Monoid)
@@ -3290,13 +3280,13 @@ fn MatMul[M: usize, K: usize, N: usize](…) -> … { … }
 | `usize`/`isize` are parameter kinds  | Not runtime value types; use `Int64`/`UInt64` for runtime                                                |
 
 Const dims feed Vākya's shape algebra (`types/shape.hpp`, `make_matmul_constraints`) so
-`cols(a)==rows(b)` is provable at compile time (module 3 discharges it). Shape errors
-become compile-time without every program paying for it.
+`cols(a)==rows(b)` is provable at compile time (module 3 discharges it). Shape errors become compile-time without every
+program paying for it.
 
 ## generic_capability_summary
 
-Each instantiation produces a `generic_capability_summary` — the single fact source
-consumed by the execution planner and Tarka:
+Each instantiation produces a `generic_capability_summary` — the single fact source consumed by the execution planner
+and Tarka:
 
 ```cpp
 struct generic_capability_summary {
@@ -3342,8 +3332,8 @@ auto res = mono.monomorphize(key, registry, required, int64_hash, "Int64", span)
 
 ### Cache Key
 
-Each instantiation gets a distinct `cache_key_fingerprint` (FNV-1a over generic name +
-all type arg hashes + const arg values). Feed into `crank_aot_key::descriptor_hashes`
+Each instantiation gets a distinct `cache_key_fingerprint` (FNV-1a over generic name + all type arg hashes + const arg
+values). Feed into `crank_aot_key::descriptor_hashes`
 via `instantiation_registry::extend_aot_key(key)`.
 
 ## Generics Feature Status
@@ -3726,16 +3716,13 @@ in [§Early-Exit Semantics](#early-exit-semantics):
 
 Crank exposes a debugger/language-server surface split across two headers:
 
-- `include/languages/crank/debug_info.hpp` — the static **data model** (POD-ish
-  aggregates, no serialization): scopes, variables, line table, breakpoints, and
-  the runtime debug-event/hook vocabulary.
-- `include/languages/crank/debug.hpp` — **builders** (assemble the model from
-  existing pipeline artifacts, no re-parsing), **JSON serializers** (DAP/LSP
-  shaped), a **pipeline stats snapshot**, and a guarded NADI pulse helper.
+- `include/languages/crank/debug_info.hpp` — the static **data model** (POD-ish aggregates, no serialization): scopes,
+  variables, line table, breakpoints, and the runtime debug-event/hook vocabulary.
+- `include/languages/crank/debug.hpp` — **builders** (assemble the model from existing pipeline artifacts, no
+  re-parsing), **JSON serializers** (DAP/LSP shaped), a **pipeline stats snapshot**, and a guarded NADI pulse helper.
 
-Everything is pay-for-use: no debug data is built until a builder is called,
-hooks default to no-op, and NADI compiles out when `observability/nadi.hpp` is
-absent.
+Everything is pay-for-use: no debug data is built until a builder is called, hooks default to no-op, and NADI compiles
+out when `observability/nadi.hpp` is absent.
 
 > **Runtime stepping is stubbed.** The interpreter executes control flow, but
 > the debugger does not yet drive it interactively: there is no live pause/step
@@ -3754,24 +3741,22 @@ absent.
 | `breakpoint_location` | `{ line, col, resolved, fn_name, verified }`                                                                                                                                   |
 | `debug_info`          | unit aggregate `{ module_name, scopes, line_table, globals }` + queries `scopes_at(span)`, `variables_in_scope(i)`, `enclosing_function(line)`                                 |
 
-`resolve_breakpoint(di, line, col=0)` snaps a requested line to the nearest
-statement-boundary row at or after it; `verified == false` when none exists.
+`resolve_breakpoint(di, line, col=0)` snaps a requested line to the nearest statement-boundary row at or after it;
+`verified == false` when none exists.
 
-`source_span` (`source_span.hpp`) is the single location currency — no new
-location type is introduced.
+`source_span` (`source_span.hpp`) is the single location currency — no new location type is introduced.
 
 ## Runtime events + hooks (stubbed)
 
 - `debug_event_kind`: `breakpoint_hit / step_line / step_in / step_out /
   watch_write / scope_enter / scope_exit / trap`.
 - `debug_event` — `{ kind, at, scope_index, detail }`.
-- `DebugEventSink` concept — any `S` with `void on_event(const debug_event&)`.
-  Dispatch is non-virtual (concept + `if constexpr`), never a vtable.
+- `DebugEventSink` concept — any `S` with `void on_event(const debug_event&)`. Dispatch is non-virtual (concept +
+  `if constexpr`), never a vtable.
 - `debug_hooks` — optional `std::function` callbacks (`on_breakpoint / on_step /
-  on_watch`) plus breakpoint/watch registries; `dispatch(event)` routes to the
-  matching callback (no-op when unset). `null_debug_hooks` is the zero-cost
-  default. `std::function` here is acceptable at host/tool boundaries; it is not
-  on the critical execution path.
+  on_watch`) plus breakpoint/watch registries; `dispatch(event)` routes to the matching callback (no-op when unset).
+  `null_debug_hooks` is the zero-cost default. `std::function` here is acceptable at host/tool boundaries; it is not on
+  the critical execution path.
 
 ## Builders (`debug.hpp`)
 
@@ -3790,17 +3775,15 @@ auto bp = crank::resolve_breakpoint(di, /*line=*/12);
 ```
 
 `build_debug_info` walks the resolver symbol table into a flat scope tree:
-module root + one scope per function; depth-0 values become `globals`, deeper
-values attach to the enclosing function scope. `decl_span` is zeroed where the
-symbol table cannot supply a span (spans live in the `property_store` keyed by
-`structural_hash`, not joinable to symbols by name). Type names are emitted as a
-stable `type#N` token from the Vakya `type_id`; editors map the id via the
+module root + one scope per function; depth-0 values become `globals`, deeper values attach to the enclosing function
+scope. `decl_span` is zeroed where the symbol table cannot supply a span (spans live in the `property_store` keyed by
+`structural_hash`, not joinable to symbols by name). Type names are emitted as a stable `type#N` token from the Vakya
+`type_id`; editors map the id via the
 `type_registry`.
 
 ## JSON serializers
 
-Follow the `dump.hpp` pattern — one `glz::meta<>` per data struct plus a manual
-fallback, guarded by `CRANK_HAS_GLAZE`:
+Follow the `dump.hpp` pattern — one `glz::meta<>` per data struct plus a manual fallback, guarded by `CRANK_HAS_GLAZE`:
 
 - `dump_debug_info(di)` — full DAP-style bundle (module, scopes, line table, globals).
 - `dump_scopes(di)`, `dump_line_table(di)`.
@@ -3811,8 +3794,8 @@ fallback, guarded by `CRANK_HAS_GLAZE`:
 
 `pipeline_stats_snapshot { optional<parse_stats>, optional<hl_lowering_stats>,
 optional<execute_stats> }` bundles every stage; `dump_pipeline_stats(snap)`
-emits only the present stages. Each stage struct gained editor-facing counters
-(additive, defaulted — existing consumers unaffected):
+emits only the present stages. Each stage struct gained editor-facing counters (additive, defaulted — existing consumers
+unaffected):
 
 - `parse_stats`: `identifier_count`, `literal_count`, `comment_bytes`, `deepest_fn_name_len`.
 - `hl_lowering_stats`: `block_count`, `max_loop_nest`.
@@ -3822,8 +3805,8 @@ emits only the present stages. Each stage struct gained editor-facing counters
 
 Behind `#if __has_include("observability/nadi.hpp")`, `debug.hpp` defines
 `crank_debug_pulse = utils::nadi::Pulse<"crank.debug", ...>` and
-`emit_debug_pulse<Sink = NoSink>(const debug_event&)`. When NADI is absent the
-helper is an inline no-op, keeping call sites portable.
+`emit_debug_pulse<Sink = NoSink>(const debug_event&)`. When NADI is absent the helper is an inline no-op, keeping call
+sites portable.
 
 ## `context` accessor
 
@@ -3844,8 +3827,8 @@ Purely opt-in; an untouched `debug_config` holds empty hooks and
 
 # Domain Views
 
-Domain views provide a *checked semantic interpretation* of an existing value without copying.
-Crank splits `type` (storage) from `view` (meaning) from `impl` (behavior):
+Domain views provide a *checked semantic interpretation* of an existing value without copying. Crank splits `type`
+(storage) from `view` (meaning) from `impl` (behavior):
 
 ```crank
 type  Array[T, Shape] struct { }            // storage
@@ -3854,8 +3837,8 @@ view  Tensor[T, Shape] of base: Array[T, Shape]  // view
 impl  Tensor[T, Shape] { ... }             // behavior on the view
 ```
 
-**Feature gate:** `domain_views`. When off, `view_decl` and `view_expr` parse but are rejected
-with `CRANK-VIEW-000`. Enable via `feature_set::enable(crank_feature::domain_views)`.
+**Feature gate:** `domain_views`. When off, `view_decl` and `view_expr` parse but are rejected with `CRANK-VIEW-000`.
+Enable via `feature_set::enable(crank_feature::domain_views)`.
 
 ## Conceptual Model
 
@@ -3885,27 +3868,25 @@ view_source = qualified_ident | "(" expr ")" ;
 view_expr   = "view" view_source "as" type ;
 ```
 
-`"of"` is contextual — only special inside `view_decl`, never globally reserved.
-The `view_expr` is a primary; postfix chains attach to the view result:
-`(view a as Tensor[...]).matmul(x)`.
-Source is a `qualified_ident` or parenthesized `(expr)`. For complex source
-expressions parenthesize: `view (x.field) as T`. Using a full expr would allow
-the level-10 `as` cast operator to greedily consume the keyword.
+`"of"` is contextual — only special inside `view_decl`, never globally reserved. The `view_expr` is a primary; postfix
+chains attach to the view result:
+`(view a as Tensor[...]).matmul(x)`. Source is a `qualified_ident` or parenthesized `(expr)`. For complex source
+expressions parenthesize: `view (x.field) as T`. Using a full expr would allow the level-10 `as` cast operator to
+greedily consume the keyword.
 
-**`impl` on views** reuses existing `impl_decl` syntax — the analysis pass resolves the
-target against both type and view symbol tables.
+**`impl` on views** reuses existing `impl_decl` syntax — the analysis pass resolves the target against both type and
+view symbol tables.
 
 ## View Type Model (§4.3)
 
-A view type is a thin wrapper `view_type = { backing_type_ref, view_descriptor_id, generic_subst }`.
-It is **not** a new type category — it is a hash-consed node in the type arena.
+A view type is a thin wrapper `view_type = { backing_type_ref, view_descriptor_id, generic_subst }`. It is **not** a new
+type category — it is a hash-consed node in the type arena.
 
 Four rules:
 
 1. **Monomorphization key** = `(view_descriptor_id, generic_subst)`.
 2. **Method dispatch is view-table-only.** `A.matmul(x)` looks up the view's `method_table` only.
-3. **`self.<backing>` is the only bridge to storage.** Inside a view method, `self.base` resolves
-   to the backing value.
+3. **`self.<backing>` is the only bridge to storage.** Inside a view method, `self.base` resolves to the backing value.
 4. **No implicit un-view.** A view type unifies only with the same `(view_id, subst)`.
 
 ## Obligation Model (§4.4)
@@ -3940,8 +3921,8 @@ Mutability lives on the Crank-side view wrapper; it is **not** lowered into the 
 
 ## Sutra Domain Framework Binding (§4.5)
 
-`@sutra.*` annotations bind to real Sutra Domain Framework components — consumed **at Crank compile
-time only**. No IR pipes through Sutra. `Crank → Lithe` is direct.
+`@sutra.*` annotations bind to real Sutra Domain Framework components — consumed **at Crank compile time only**. No IR
+pipes through Sutra. `Crank → Lithe` is direct.
 
 | Annotation                            | Sutra component                                                                                       |
 |---------------------------------------|-------------------------------------------------------------------------------------------------------|
@@ -3950,8 +3931,8 @@ time only**. No IR pipes through Sutra. `Crank → Lithe` is direct.
 | `@sutra.laws(pure, deterministic, …)` | `operation_metadata` / `op_metadata_of<Tag>`; `Pure+Deterministic` → zero SMT, no Tarka round-trip    |
 | `@sutra.affinity(simd, gpu, …)`       | `execution_affinity`; advisory — platform decides execution                                           |
 
-**Cross-domain ops** (`Tensor + Scalar`): resolved via Sutra `resolve_interaction` (5-phase, opt-in).
-Proof obligations share the same Tarka `verify()` sink as view obligations. Undefined interaction →
+**Cross-domain ops** (`Tensor + Scalar`): resolved via Sutra `resolve_interaction` (5-phase, opt-in). Proof obligations
+share the same Tarka `verify()` sink as view obligations. Undefined interaction →
 `CRANK-VIEW-002` with the full resolver trace.
 
 **Materialize-out (un-view)**: zero-copy = lossless edge (free); copying = costed edge (explicit
@@ -3963,10 +3944,9 @@ weighted least-cost query.
 Three lowering shapes:
 
 1. **Erased** — fully-static shape, obligations proven, view doesn't escape → view disappears.
-2. **Base-reference only** — metadata compile-time known, view escapes → backing ref + compile-time
-   side-table.
-3. **Lithe `memref_type`** — runtime-known shape/stride → `memref_desc` (rank, element_kind,
-   shape, strides). No new IR op family. Runtime view guards → `guard` + `trap` (HL `assert`).
+2. **Base-reference only** — metadata compile-time known, view escapes → backing ref + compile-time side-table.
+3. **Lithe `memref_type`** — runtime-known shape/stride → `memref_desc` (rank, element_kind, shape, strides). No new IR
+   op family. Runtime view guards → `guard` + `trap` (HL `assert`).
 
 View method-call lowering:
 
@@ -3975,15 +3955,14 @@ View method-call lowering:
 - `@sutra.op(name=…)` → `("lithe.hl","call")` to the registered hook; backend at plan time:
   `blas_hook` → `simd_fn` → `msl_fragment` → scalar fallback.
 
-**Domain metadata is compile-stage ephemeral in v1** — steers Crank's planner but is dropped at the
-IR trust boundary. Wire contract deferred to Lithe 1.6.0 `domain_attr` (v2 additive minor).
+**Domain metadata is compile-stage ephemeral in v1** — steers Crank's planner but is dropped at the IR trust boundary.
+Wire contract deferred to Lithe 1.6.0 `domain_attr` (v2 additive minor).
 
 ## Host Interop (§4.7)
 
-- **Extern backing type**: `@host.type(name=…) type T extern` + `view V of base: T` → zero-copy
-  view onto a C++ buffer.
-- **View provider**: `context_builder::register_view_{check,metadata,lowering}` callbacks. Missing
-  provider → `CRANK-VIEW-009`.
+- **Extern backing type**: `@host.type(name=…) type T extern` + `view V of base: T` → zero-copy view onto a C++ buffer.
+- **View provider**: `context_builder::register_view_{check,metadata,lowering}` callbacks. Missing provider →
+  `CRANK-VIEW-009`.
 
 ## Diagnostics — CRANK-VIEW-000..011
 
@@ -4006,13 +3985,13 @@ Orphan-rule violations reuse the existing **coherence** diagnostic (not a new VI
 
 ## v1 Minimal Set
 
-Syntax: `view Name[Params] of base: SourceType [requires …]`, `view primary as ViewType`.
-Semantics: view decl, explicit view construction, `requires` obligations, `impl` methods on views,
-pure-Crank method bodies, optional `@sutra.*` annotations, obligation emission, metadata propagation.
-Initial domain: **Tensor** only (Image/GraphAdjacency are pure-Crank examples in docs).
+Syntax: `view Name[Params] of base: SourceType [requires …]`, `view primary as ViewType`. Semantics: view decl, explicit
+view construction, `requires` obligations, `impl` methods on views, pure-Crank method bodies, optional `@sutra.*`
+annotations, obligation emission, metadata propagation. Initial domain: **Tensor** only (Image/GraphAdjacency are
+pure-Crank examples in docs).
 
-Deferred to v2: implicit views, type-directed shorthand, non-tensor domain lowering, distributed views,
-autograd, wire-portable metadata (Lithe 1.6.0 `domain_attr`).
+Deferred to v2: implicit views, type-directed shorthand, non-tensor domain lowering, distributed views, autograd,
+wire-portable metadata (Lithe 1.6.0 `domain_attr`).
 
 ## Full Linear Example
 
@@ -4047,9 +4026,8 @@ fn linear(w: Array[Float32,[M,K]], x: Array[Float32,[K,N]]) -> Tensor[Float32,[M
 
 # Roadmap & Non-Goals
 
-This section is the forward-looking backlog. It does **not** describe currently
-available behavior — for what the compiler accepts today, see the Grammar
-Summary and Capability Matrix above, which carry per-feature status labels.
+This section is the forward-looking backlog. It does **not** describe currently available behavior — for what the
+compiler accepts today, see the Grammar Summary and Capability Matrix above, which carry per-feature status labels.
 
 > **Already landed.** Several items once tracked here now ship in the current
 > implementation and are documented in the sections above: CFG-aware scalar
@@ -4060,14 +4038,12 @@ Summary and Capability Matrix above, which carry per-feature status labels.
 
 **Still planned / not available:**
 
-- Grammar-level `module` keyword — generic modules are supported by the sema library
-  (`module_generics.hpp`), but the surface `module M[T: Bound] { … }` production is not yet parsed.
+- Grammar-level `module` keyword — generic modules are supported by the sema library (`module_generics.hpp`), but the
+  surface `module M[T: Bound] { … }` production is not yet parsed.
 - Structured concurrency surface in the language (`task_scope`, `deadline`,
-  `savepoint`, `rollback_to`, `@reflect` as grammar keywords) — these exist only
-  as standalone host-side C++ APIs.
+  `savepoint`, `rollback_to`, `@reflect` as grammar keywords) — these exist only as standalone host-side C++ APIs.
 - Async `CoroutineBackend`; the futures runtime is currently eager-inline.
-- Multi-resource transactions past parsing — sema still enforces single-resource
-  (`CRANK-TX-002`).
+- Multi-resource transactions past parsing — sema still enforces single-resource (`CRANK-TX-002`).
 - AOT artifact signing / secure loader (`serialize()` is write-only; no parse path).
 - In-tree distributed execution runtime; Metal currently covers the shared f32 elementwise GPU subset.
 
@@ -4261,8 +4237,8 @@ form. The `.message` field is unchanged, so existing tooling that greps it is un
 `concrete_type_hash`. Only a genuine full-key tie is reported as ambiguous (`CRANK-GEN-007`); identical inputs always
 pick the same winner.
 
-**Stable metadata / ABI.** `module_link_metadata::serialize()` emits instantiations in ascending-fingerprint order (
-canonical bytes), `canonical_hash()` gives an order-independent identity for a module's instantiation set,
+**Stable metadata / ABI.** `module_link_metadata::serialize()` emits instantiations in ascending-fingerprint order
+(canonical bytes), `canonical_hash()` gives an order-independent identity for a module's instantiation set,
 `link_modules()` returns its merged set sorted by fingerprint, and `instantiation_registry::extend_aot_key()` folds
 fingerprints in sorted order. Two builds that record the same instantiations in different orders produce identical
 metadata and identical AOT keys.
@@ -4313,9 +4289,9 @@ short-circuits so the monomorphizer never runs. Callers that do not care about l
 ### §v2.7 CFG-Aware Scalar Execution
 
 > **Status: Implemented.** The interpreter executes control-flow graphs today — conditional branches (`if`/`else`,
-`match`), loops (`for`/`while`), early `return`, `defer` LIFO cleanup, runtime safety guards, `transaction` blocks, and
-`break`/`continue` with defer unwinding. `branch`/`branch_cond` are first-class opcodes; the retained
-`execution_status::unsupported_control_flow` enumerator is no longer produced. A branch to a nonexistent block is
+> `match`), loops (`for`/`while`), early `return`, `defer` LIFO cleanup, runtime safety guards, `transaction` blocks, and
+> `break`/`continue` with defer unwinding. `branch`/`branch_cond` are first-class opcodes; the retained
+> `execution_status::unsupported_control_flow` enumerator is no longer produced. A branch to a nonexistent block is
 > diagnosed (`branch target block id N does not exist in function`).
 > See [Scalar Path + Interpreter](#scalar-path--interpreter). The only remaining gap is the interactive stepping
 > backend (
@@ -4324,8 +4300,10 @@ short-circuits so the monomorphizer never runs. Callers that do not care about l
 ### §v2.8 Real SIMD and GPU Backends
 
 > **Status: partially implemented.** CPU SIMD is implemented via Highway (`lithe_codegen_simd.hpp`). GPU lowering shares
-> Lithe's HL-MIR device plan: Metal compiles and dispatches the currently supported f32 elementwise subset, while Vulkan/
-> MoltenVK remains an opt-in provider until its headers and loader are supplied. The remainder of this entry is the target design.
+> Lithe's HL-MIR device plan: Metal compiles and dispatches the currently supported f32 elementwise subset, while
+> Vulkan/
+> MoltenVK remains an opt-in provider until its headers and loader are supplied. The remainder of this entry is the
+> target design.
 
 At least one non-scalar backend is working per target:
 
@@ -4360,8 +4338,8 @@ MoltenVK/SPIRV-Cross constraints or MSL conversion fails on Apple Silicon:
   bindings makes SPIRV-Cross index MSL resource tables past their size (crash in `is_msl_resource_binding_used`).
 - Type opcodes are exact: `OpTypeInt` = 21, `OpTypeFloat` = 22, `OpTypeVector` = 23. An off-by-one shifts `OpTypeFloat`
   onto a value that reads a spurious FP-encoding operand (`Unrecognized FP encoding mode for OpTypeFloat`).
-- The `OpEntryPoint` name literal is NUL-terminated and word-padded: `"main"` (4 bytes) forces a whole second name
-  word (`0x00000000`), else SPIRV-Cross reads into the interface id and reports `Entry point does not exist`.
+- The `OpEntryPoint` name literal is NUL-terminated and word-padded: `"main"` (4 bytes) forces a whole second name word
+  (`0x00000000`), else SPIRV-Cross reads into the interface id and reports `Entry point does not exist`.
 
 ### §v2.9 Structured Concurrency
 
@@ -4394,8 +4372,8 @@ children.
 **New ownership rules:**
 
 - `scope.spawn` captures by value (same as `spawn`).
-- A `task_scope` must not outlive its enclosing function — enforced at compile time by scope-lifetime checking (
-  analogous to borrow-check in scope level).
+- A `task_scope` must not outlive its enclosing function — enforced at compile time by scope-lifetime checking
+  (analogous to borrow-check in scope level).
 
 ### §v2.10 Distributed Execution
 
@@ -4418,10 +4396,10 @@ fn compute(data: []Float32) -> Float32 { ... }
 **Policy:** distribution is **never silently selected**. A function is distributed only when `@distributed(...)` is
 present. The execution planner emits a NADI pulse when a placement constraint is relaxed.
 
-**Hard vs soft placement (required/preferred).** A distributed placement is a *preference* by
-default — like `@parallel`/`@gpu`, an unmet placement falls back to local execution. A remote
-function must **not** silently become local when that changes latency, isolation, or
-data-residency guarantees, so `required=true` promotes the miss to an error:
+**Hard vs soft placement (required/preferred).** A distributed placement is a *preference* by default — like
+`@parallel`/`@gpu`, an unmet placement falls back to local execution. A remote function must **not** silently become
+local when that changes latency, isolation, or data-residency guarantees, so `required=true` promotes the miss to an
+error:
 
 ```text
 @distributed(required=true)  → missing adapter / unplaceable is an error (CRANK-DIST-003);
@@ -4484,9 +4462,9 @@ transaction(serializable, coordinator = my_coordinator) {
       atomic multi-resource commit requires a coordinator.
   ```
 
-  Consistent multi-resource *reads* under `snapshot` remain allowed without a coordinator (v1
-  behavior preserved). Multi-resource *writes* do **not** commit atomically under bare `snapshot` —
-  each resource would commit independently — so they are rejected (`CRANK-TX-012`) unless a
+  Consistent multi-resource *reads* under `snapshot` remain allowed without a coordinator (v1 behavior preserved).
+  Multi-resource *writes* do **not** commit atomically under bare `snapshot` — each resource would commit
+  independently — so they are rejected (`CRANK-TX-012`) unless a
   `coordinator` provides the atomic-commit path. Single-resource `snapshot` writes are unaffected.
 - The coordinator is responsible for 2PC or equivalent; Crank wraps and policy-checks; Medha executes per-resource.
 
@@ -4505,9 +4483,9 @@ transaction(serializable, coordinator = my_coordinator) {
 - `CRANK-TX-011` = a declared coordinator name is unregistered.
 - `CRANK-TX-012` = snapshot multi-resource write without a coordinator.
 
-Rollback/staging-capability failures are **not** `CRANK-TX-009`; they carry their own codes
-(`CRANK-TX-001`/`-003`/`-008` for non-transactional write, missing snapshot capability, and
-irreversible effect respectively). Every diagnostic code has exactly one permanent meaning.
+Rollback/staging-capability failures are **not** `CRANK-TX-009`; they carry their own codes (`CRANK-TX-001`/`-003`/
+`-008` for non-transactional write, missing snapshot capability, and irreversible effect respectively). Every diagnostic
+code has exactly one permanent meaning.
 
 ### §v2.12 Nested Transactions and Savepoints
 
@@ -4663,19 +4641,18 @@ Reflection scopes:
 **Not exposed by v2 reflection:** arbitrary runtime type queries, code generation beyond layout/adapters, or
 modification of the type registry at runtime. Those are v3.
 
-**Layout stability (field offsets are context-bound).** A reflected field offset is only meaningful
-under a specific target layout. Every `type_descriptor<T>` carries a `layout_context`
-(`target_abi_hash`, `packing`, `alignment`, `endianness`, `layout_version`); by default it is the
-native context of `T` in the compiling process. Two descriptors are only interchangeable when their
+**Layout stability (field offsets are context-bound).** A reflected field offset is only meaningful under a specific
+target layout. Every `type_descriptor<T>` carries a `layout_context`
+(`target_abi_hash`, `packing`, `alignment`, `endianness`, `layout_version`); by default it is the native context of `T`
+in the compiling process. Two descriptors are only interchangeable when their
 `layout_context` values are identical (`reflection_matches(artifact, current)`).
 
-`type_descriptor<T>::layout_fingerprint()` hashes the layout context **and** every field offset, so
-any change to ABI, packing, alignment, endianness, layout-policy version, or a field offset produces
-a different fingerprint. An AOT artifact that embeds reflected offsets records this fingerprint in
+`type_descriptor<T>::layout_fingerprint()` hashes the layout context **and** every field offset, so any change to ABI,
+packing, alignment, endianness, layout-policy version, or a field offset produces a different fingerprint. An AOT
+artifact that embeds reflected offsets records this fingerprint in
 `aot_artifact_header_v2::reflection_layout_hash`; `validate_aot_view_v2(..., current_reflection_layout_hash)`
-emits **`CRANK-AOT-SEC-009`** when the artifact's fingerprint does not match the current layout —
-reflected offsets never silently leak an unstable layout across an ABI/packing/endianness/version
-change; the artifact must be recompiled.
+emits **`CRANK-AOT-SEC-009`** when the artifact's fingerprint does not match the current layout — reflected offsets
+never silently leak an unstable layout across an ABI/packing/endianness/version change; the artifact must be recompiled.
 
 ---
 
@@ -4792,6 +4769,5 @@ If those questions do not justify grammar, the feature must not become syntax.
 
 - `docs/languages/crank/grammar.md` — full grammar
 - `include/languages/crank/` — all headers
-- `src/examples/crank/example_crank.hpp` — comprehensive 55-exercise tutorial
-  (ex01–ex30 per-stage; ex31–ex39 end-to-end pipeline runs; ex40–ex46
-  performance and data-structure comparisons; ex47–ex55 domain views)
+- `src/examples/crank/example_crank.hpp` — comprehensive 55-exercise tutorial (ex01–ex30 per-stage; ex31–ex39 end-to-end
+  pipeline runs; ex40–ex46 performance and data-structure comparisons; ex47–ex55 domain views)

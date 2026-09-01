@@ -1,13 +1,12 @@
 # Crank — Language Grammar
 
-Companion to `design.md`. This file owns the **complete lexical + syntactic grammar** and its
-mapping onto **lexy** productions. `design.md` owns everything else (architecture, pipeline,
-semantics, runtime, host embedding, AOT, library gaps).
+Companion to `design.md`. This file owns the **complete lexical + syntactic grammar** and its mapping onto **lexy**
+productions. `design.md` owns everything else (architecture, pipeline, semantics, runtime, host embedding, AOT, library
+gaps).
 
-Crank is Go-*inspired* but not Go-*compatible*. It is deliberately minimal: no `int`/`uint`
-aliases, no implicit numeric conversions, no `nil`, no pointer arithmetic, no `panic`/`recover`,
-no C-style `switch` fallthrough. Fixed-width numeric types only, so SIMD/GPU/serialization/AOT
-layouts are predictable.
+Crank is Go- *inspired* but not Go- *compatible*. It is deliberately minimal: no `int`/`uint`
+aliases, no implicit numeric conversions, no `nil`, no pointer arithmetic, no `panic`/`recover`, no C-style `switch`
+fallthrough. Fixed-width numeric types only, so SIMD/GPU/serialization/AOT layouts are predictable.
 
 ---
 
@@ -15,8 +14,8 @@ layouts are predictable.
 
 - EBNF: `=` defines, `|` alternation, `{ }` zero-or-more, `[ ]` optional, `( )` grouping,
   `" "` terminal literal, `UPPER` = lexical token, `lower` = grammar production.
-- Grammar is defined over a **token stream** produced by the lexer (§3), not raw bytes. The lexy
-  frontend fuses lexing + parsing (§8), but the two layers are described separately for clarity.
+- Grammar is defined over a **token stream** produced by the lexer (§3), not raw bytes. The lexy frontend fuses lexing +
+  parsing (§8), but the two layers are described separately for clarity.
 - Encoding: source is UTF-8. Identifiers are ASCII-only in v1 (see gap `G-LEX-1` in `design.md`).
 
 ---
@@ -35,8 +34,8 @@ package_clause = "package" IDENT ;
 - A directory of `.crank` files sharing a `package` name forms one package (see `design.md`
   §Module System). `module.crank` names the package root.
 - `import` declarations are source-level module dependencies; at the host embedding API level
-  `engine::load("name")` resolves modules through the 9-tier `module_resolver` before evaluation
-  (see `crank.md` §Module Facade). The two are complementary: `import` is language syntax, `load`
+  `engine::load("name")` resolves modules through the 9-tier `module_resolver` before evaluation (see `crank.md` §Module
+  Facade). The two are complementary: `import` is language syntax, `load`
   is the host API for runtime-controlled resolution.
 
 ---
@@ -50,11 +49,10 @@ NEWLINE   = "\n" | "\r\n" ;
 WS        = " " | "\t" ;
 ```
 
-- Crank is **newline-sensitive** at the statement/decl level (like Go): a `NEWLINE` terminates a
-  statement unless the line ends in a state that clearly continues (open binary operator, open
-  `(`/`[`/`{`, trailing `,`). Implemented via lexy `context_flag`-driven automatic semicolon
-  insertion (ASI); see §8.4. There is **no** explicit `;` in idiomatic source (allowed but
-  redundant).
+- Crank is **newline-sensitive** at the statement/decl level (like Go): a `NEWLINE` terminates a statement unless the
+  line ends in a state that clearly continues (open binary operator, open
+  `(`/`[`/`{`, trailing `,`). Implemented via lexy `context_flag`-driven automatic semicolon insertion (ASI); see §8.4.
+  There is **no** explicit `;` in idiomatic source (allowed but redundant).
 - WS between tokens is insignificant.
 
 ### 3.2 Comments
@@ -64,8 +62,7 @@ line_comment  = "//" { any_char_except_newline } ;
 block_comment = "/*" { any_char } "*/" ;   (* non-nesting *)
 ```
 
-Comments are whitespace to the parser but retained as trivia on the lexy `parse_tree` for source
-maps / diagnostics.
+Comments are whitespace to the parser but retained as trivia on the lexy `parse_tree` for source maps / diagnostics.
 
 ### 3.3 Identifiers & Keywords
 
@@ -87,32 +84,31 @@ requires ensures  assert
 trait    impl     view    extern
 ```
 
-**Verification keywords** (`requires ensures assert`) form the *verification
-surface* — Tarka-backed language constructs (see `design.md` §Verification-in-the-Language). They
-are always parsed; whether they are *discharged* depends on build policy (default: runtime guard;
-opt-in: Tarka/Z3 static proof via `@verify(static)`). They carry **zero runtime cost when proven** and never appear in
+**Verification keywords** (`requires ensures assert`) form the *verification surface* — Tarka-backed language constructs
+(see `design.md` §Verification-in-the-Language). They are always parsed; whether they are *discharged* depends on build
+policy (default: runtime guard; opt-in: Tarka/Z3 static proof via `@verify(static)`). They carry **zero runtime cost
+when proven** and never appear in
 `@pure` hot paths unless the user writes them.
 
-**Contextual-only identifiers** (not globally reserved; only special inside their enclosing
-production — safe to use as variable names in normal code):
+**Contextual-only identifiers** (not globally reserved; only special inside their enclosing production — safe to use as
+variable names in normal code):
 
 - `forall`, `exists` — only inside `pred_expr` (requires/ensures/assert predicates)
 - `async` — not yet a keyword (no `async fn` production; reserved name space, may be activated later)
 
-**`transaction`** is a reserved keyword introducing a transactional-memory block (§6.2). It lowers
-onto the **Medha** substrate (see `design.md` §Transactional Memory via Medha); because it is a
-language keyword, Medha is a required crank runtime component. Transaction *option words* used
-inside `transaction(...)` args (`isolation`, `retry`, `replay`, `conflict`, `partial`,
+**`transaction`** is a reserved keyword introducing a transactional-memory block (§6.2). It lowers onto the **Medha**
+substrate (see `design.md` §Transactional Memory via Medha); because it is a language keyword, Medha is a required crank
+runtime component. Transaction *option words* used inside `transaction(...)` args (`isolation`, `retry`, `replay`,
+`conflict`, `partial`,
 `durability`, `distribution`, and their values `snapshot`/`serializable`/`memory`/`durable`/`optimistic`/… listed in
-§6.2) are
-**contextual** — reserved only inside a `transaction` argument list, not global keywords.
+§6.2) are **contextual** — reserved only inside a `transaction` argument list, not global keywords.
 
-**`view`** is a reserved keyword introducing a domain view declaration (`view_decl`, §5.5) or
-a view construction expression (`view_expr`, §7.13). **Feature-gated** by the `domain_views` edition
-flag — without it, `view` is still parsed but sema rejects it (`CRANK-VIEW-003`). The word **`of`**
+**`view`** is a reserved keyword introducing a domain view declaration (`view_decl`, §5.5) or a view construction
+expression (`view_expr`, §7.13). **Feature-gated** by the `domain_views` edition flag — without it, `view` is still
+parsed but sema rejects it (`CRANK-VIEW-003`). The word **`of`**
 that follows `view IDENT` in a `view_decl` is **contextual** — matched as a literal only inside the
-`view_decl` production (dispatched via the reserved `view` peek), never entered into the global
-reserve set. User code that names something `of` is therefore unaffected.
+`view_decl` production (dispatched via the reserved `view` peek), never entered into the global reserve set. User code
+that names something `of` is therefore unaffected.
 
 **Contextual words** (not reserved; only special in their enclosing construct, as noted):
 
@@ -127,8 +123,8 @@ exists    (* contextual: pred_expr quantifier only *)
 async     (* reserved name-space placeholder; no grammar production; may be activated later *)
 ```
 
-`trait` and `impl` are **reserved keywords** (generic-bound declarations + conformance, §5.2). The
-generic-model bound names (`Numeric`, `Copy`, `ParallelSafe`, …) are **predeclared identifiers**
+`trait` and `impl` are **reserved keywords** (generic-bound declarations + conformance, §5.2). The generic-model bound
+names (`Numeric`, `Copy`, `ParallelSafe`, …) are **predeclared identifiers**
 resolved by the trait registry (like the primitive types), **not** keywords.
 
 ### 3.4 Literals
@@ -151,9 +147,9 @@ RAW_STRING_LIT = "`" { any_char_except_backtick } "`" ;
 escape         = "\" ( "n" | "t" | "r" | "\" | '"' | "0" | "x" hex hex | "u{" hex+ "}" ) ;
 ```
 
-- Numeric literals are **untyped constants** until context assigns a fixed-width type
-  (§ literal typing rule in `design.md` semantics). No implicit narrowing at runtime — the
-  constant must fit the target type at compile time or it is a diagnostic.
+- Numeric literals are **untyped constants** until context assigns a fixed-width type (§ literal typing rule in
+  `design.md` semantics). No implicit narrowing at runtime — the constant must fit the target type at compile time or it
+  is a diagnostic.
 - `_` digit separators are stripped by the lexer.
 
 ### 3.5 Operators & Punctuation
@@ -171,9 +167,8 @@ escape         = "\" ( "n" | "t" | "r" | "\" | '"' | "0" | "x" hex hex | "u{" he
 @                            attribute sigil
 ```
 
-`?` is an **operator**, not a keyword. It only appears in postfix position (after an expression);
-see §7.x for semantics. It does not form part of any ternary or optional-type syntax — options
-are written `Option[T]`.
+`?` is an **operator**, not a keyword. It only appears in postfix position (after an expression); see §7.x for
+semantics. It does not form part of any ternary or optional-type syntax — options are written `Option[T]`.
 
 ### 3.6 Attributes
 
@@ -189,16 +184,16 @@ attr_arg       = IDENT [ "=" ( INT_LIT | IDENT | BOOL_LIT | STRING_LIT ) ]
 ```
 
 Attributes attach to the **following** declaration or statement. Semantics in `design.md`
-(§Attributes & Effects, §4.6a, §5b). A `builtin_attr` is the closed, **unqualified** execution/effect
-set. A **namespaced** `qualified_ident` attr (`@lithe.cacheline`, `@pravaha.device_resident`,
+(§Attributes & Effects, §4.6a, §5b). A `builtin_attr` is the closed, **unqualified** execution/effect set. A
+**namespaced** `qualified_ident` attr (`@lithe.cacheline`, `@pravaha.device_resident`,
 `@domain.finance`, `@tarka.assume`) is an extension resolved through the **typed annotation registry**
-(design.md §5b): its identity is fully qualified, its arguments are schema-validated, and an unknown
-or ill-typed annotation is preserved, handed to a host handler, or rejected per module policy. There
-is **no** global (unqualified) extension-attribute namespace — every user annotation carries a `.`
+(design.md §5b): its identity is fully qualified, its arguments are schema-validated, and an unknown or ill-typed
+annotation is preserved, handed to a host handler, or rejected per module policy. There is **no** global (unqualified)
+extension-attribute namespace — every user annotation carries a `.`
 namespace (`lithe.*`/`pravaha.*`/`medha.*`/`tarka.*`/`sutra.*`/`domain.*`/`company.*`/`user.*`).
 
-**Execution-attribute arguments (shared model).** `@parallel`/`@simd`/`@gpu` share one small argument
-set that lowers into a Lithe `execution_hint` (design.md §4.6a):
+**Execution-attribute arguments (shared model).** `@parallel`/`@simd`/`@gpu` share one small argument set that lowers
+into a Lithe `execution_hint` (design.md §4.6a):
 
 ```crank
 @gpu                          // soft: prefer GPU; fall back to SIMD/CPU
@@ -211,20 +206,19 @@ set that lowers into a Lithe `execution_hint` (design.md §4.6a):
 
 - `required : Bool = false` — `true` promotes an unmet preference to a compile-time diagnostic;
   `required` **dominates** `preference`.
-- `preference : (normal | strong) = normal` — `strong` biases backend selection more heavily and
-  allows a lower profitability threshold, but still preserves legality + safe fallback. `strong`
+- `preference : (normal | strong) = normal` — `strong` biases backend selection more heavily and allows a lower
+  profitability threshold, but still preserves legality + safe fallback. `strong`
   replaces the earlier `aggressive` idea (no unsafe implication). `weak` is reserved for later.
-- `deterministic : Bool = false` — on `@parallel`, keeps only plans that preserve deterministic
-  semantics (drops reorder-unsafe reductions).
+- `deterministic : Bool = false` — on `@parallel`, keeps only plans that preserve deterministic semantics (drops
+  reorder-unsafe reductions).
 
-Any other argument name/value on a built-in execution attribute is a diagnostic (the set is closed).
-Standalone `@sequential`/`@no_gpu`/`@deterministic` attributes are **not** provided — the argument
-model above expresses those shades, and automatic analysis (design.md §4.6a) is the default anyway.
+Any other argument name/value on a built-in execution attribute is a diagnostic (the set is closed). Standalone
+`@sequential`/`@no_gpu`/`@deterministic` attributes are **not** provided — the argument model above expresses those
+shades, and automatic analysis (design.md §4.6a) is the default anyway.
 
-**Hard vs soft execution attributes.** `@parallel`, `@simd`, and `@gpu` are **preferences** by
-default — if the target/backend/legality is unavailable, crank falls back (parallel → sequential,
-gpu → simd → cpu) and emits a NADI pulse (Pravaha's "no silent degradation" invariant). To demand
-execution, pass `required=true`:
+**Hard vs soft execution attributes.** `@parallel`, `@simd`, and `@gpu` are **preferences** by default — if the
+target/backend/legality is unavailable, crank falls back (parallel → sequential, gpu → simd → cpu) and emits a NADI
+pulse (Pravaha's "no silent degradation" invariant). To demand execution, pass `required=true`:
 
 ```crank
 @parallel                 // soft: prefer Pravaha parallel; fall back to sequential if illegal
@@ -235,8 +229,8 @@ execution, pass `required=true`:
 ```
 
 `required=true` turns an unmet preference from a runtime fallback into a **compile-time diagnostic**
-(design.md §Attributes & Effects). The bare `@must_parallel`/`@must_gpu` spellings are **not** added
-— the single `required=<bool>` argument keeps the attribute set closed and uniform. `required`
+(design.md §Attributes & Effects). The bare `@must_parallel`/`@must_gpu` spellings are **not** added — the single
+`required=<bool>` argument keeps the attribute set closed and uniform. `required`
 defaults to `false`; any other value is a diagnostic.
 
 ---
@@ -327,15 +321,15 @@ var_decl   = "var" IDENT ":" type "=" expr        (* typed + initialized        
            | "var" IDENT "=" expr ;               (* inferred from initializer      *)
 ```
 
-- **Public boundary rule**: `fn`/`type`/`const` names starting with an uppercase letter are
-  exported from the package; lowercase = package-private (Go convention, kept). Exported `fn`
-  signatures **require explicit parameter and return types** — no inference across the public API
-  boundary. Local `let`/`var` may infer.
+- **Public boundary rule**: `fn`/`type`/`const` names starting with an uppercase letter are exported from the package;
+  lowercase = package-private (Go convention, kept). Exported `fn`
+  signatures **require explicit parameter and return types** — no inference across the public API boundary. Local `let`/
+  `var` may infer.
 
 ### 5.1 `var` initialization & zero values
 
-`var x` (no type, no initializer) is rejected — a variable's type and initial value must both be
-determinable at its declaration. The three legal forms:
+`var x` (no type, no initializer) is rejected — a variable's type and initial value must both be determinable at its
+declaration. The three legal forms:
 
 | Form               | Type source        | Initial value                     |
 |--------------------|--------------------|-----------------------------------|
@@ -358,17 +352,17 @@ determinable at its declaration. The three legal forms:
 | `Option[T]`                      | `Option.None`                                                      |
 | `Result[T,E]`, `enum`, `fn(...)` | **no zero value** — `var x: T` is a compile error; must initialize |
 
-`Result`, bare `enum` (no designated default variant), and function types have no meaningful zero,
-so they force the `var x: T = e` form. This keeps "zero value" total only where it is unambiguous.
+`Result`, bare `enum` (no designated default variant), and function types have no meaningful zero, so they force the
+`var x: T = e` form. This keeps "zero value" total only where it is unambiguous.
 
 ### 5.2 Traits & implementations (generic bounds)
 
-Bounds in `[T: Bound]` are **traits** — explicit semantic capabilities, declared and implemented
-with `trait`/`impl` (no implicit structural conformance). Full model in `design.md` §17.
+Bounds in `[T: Bound]` are **traits** — explicit semantic capabilities, declared and implemented with `trait`/`impl` (no
+implicit structural conformance). Full model in `design.md` §17.
 
-`Self` is a **contextual type identifier** available only inside `trait` and `impl` bodies, where it
-names the implementing type. It is **not** a global keyword (not in §3 reserved words) and cannot be
-bound as a local/parameter name in those contexts.
+`Self` is a **contextual type identifier** available only inside `trait` and `impl` bodies, where it names the
+implementing type. It is **not** a global keyword (not in §3 reserved words) and cannot be bound as a local/parameter
+name in those contexts.
 
 ```ebnf
 trait_decl  = "trait" IDENT [ generic_params ] "{" { trait_member NEWLINE } "}" ;
@@ -396,9 +390,8 @@ view_decl   = "view" IDENT [ generic_params ] "of" IDENT ":" type
 ```
 
 - **`Self`-first traits.** For single-type algebraic traits (`Monoid`, `Numeric`, `Ordered`,
-  `Iterator`), `Self` names the implementing type — no trait type parameter is needed. Generic trait
-  parameters (`trait AddInto[A, B, C]`) are reserved for genuinely **multi-type** relations. Prefer
-  the `Self` style:
+  `Iterator`), `Self` names the implementing type — no trait type parameter is needed. Generic trait parameters
+  (`trait AddInto[A, B, C]`) are reserved for genuinely **multi-type** relations. Prefer the `Self` style:
 
   ```crank
   trait Monoid {
@@ -416,51 +409,48 @@ view_decl   = "view" IDENT [ generic_params ] "of" IDENT ":" type
   ```
 
 - **Static-member lookup (trait members through a type parameter).** Inside a generic function where
-  `T: Monoid`, static trait members may be referenced as `T.identity()` / `T.combine(a, b)`. This is
-  **syntactic sugar for the selected `impl Monoid for T` witness**. If two of `T`'s bounds provide
-  the same member name, the bare `T.member` reference is **ambiguous** and is a diagnostic — it must
-  be qualified through the trait: `Monoid[T].identity()` / `Monoid[T].combine(acc, x)`. The qualified
-  form `Trait[T].member(...)` is always legal and is the disambiguator (design.md §17.4a).
+  `T: Monoid`, static trait members may be referenced as `T.identity()` / `T.combine(a, b)`. This is **syntactic sugar
+  for the selected `impl Monoid for T` witness**. If two of `T`'s bounds provide the same member name, the bare
+  `T.member` reference is **ambiguous** and is a diagnostic — it must be qualified through the trait:
+  `Monoid[T].identity()` / `Monoid[T].combine(acc, x)`. The qualified form `Trait[T].member(...)` is always legal and is
+  the disambiguator (design.md §17.4a).
 - Conformance is **explicit**: a type satisfies `T: Numeric` only if an `impl Numeric for T` exists.
 - **Associated types are v2-gated.** `assoc_type_decl` (`type Item`) and its projection (`Self.Item`,
-  `I.Item`) **parse** in v1 for forward compatibility but are **rejected** unless the compiler
-  enables the v2 `associated_types` feature (design.md §17.4/§17.12). v1 diagnoses their use; the
-  syntax is reserved so v2 needs no grammar break.
+  `I.Item`) **parse** in v1 for forward compatibility but are **rejected** unless the compiler enables the v2
+  `associated_types` feature (design.md §17.4/§17.12). v1 diagnoses their use; the syntax is reserved so v2 needs no
+  grammar break.
 - **Type specialization is v2-gated.** A *type-specialized* impl (`impl Vector[Float32] { … }`)
-  **parses** in v1 but is **rejected** unless the compiler enables the v2 `specialization` feature —
-  the same parse-but-gate treatment as associated types. Generic (parametric) impls
-  (`impl[T: Numeric] Vector[T] { … }`) ship in v1. When enabled, a specialization must be unambiguous,
-  non-overlapping, and cannot weaken safety/effect constraints (`design.md` §17.9). Higher-kinded
-  traits and variance are out of scope for v1 (§10.2).
-- **Coherence / orphan rule (v1, always enforced).** An `impl Trait for Type` is legal only if the
-  defining module **owns the trait or owns the implementing type** — forbidding foreign-trait-for-
-  foreign-type impls, so cross-package impls can never conflict (`design.md` §17.9).
-- **Callable bounds.** A callable parameter is bounded by `Fn(ArgTypes) -> Ret`, stating arity +
-  signature, combined with effect bounds (`F: Fn(T) -> U + Pure`). Bare `fn(T) -> U` remains the
-  concrete function-pointer *type*; the `Fn` *bound* additionally admits closures while staying
-  monomorphized (`design.md` §17.6). `FnMut`/`FnOnce` are inferred by sema — not user-writeable.
+  **parses** in v1 but is **rejected** unless the compiler enables the v2 `specialization` feature — the same
+  parse-but-gate treatment as associated types. Generic (parametric) impls (`impl[T: Numeric] Vector[T] { … }`) ship in
+  v1. When enabled, a specialization must be unambiguous, non-overlapping, and cannot weaken safety/effect constraints
+  (`design.md` §17.9). Higher-kinded traits and variance are out of scope for v1 (§10.2).
+- **Coherence / orphan rule (v1, always enforced).** An `impl Trait for Type` is legal only if the defining module
+  **owns the trait or owns the implementing type** — forbidding foreign-trait-for- foreign-type impls, so cross-package
+  impls can never conflict (`design.md` §17.9).
+- **Callable bounds.** A callable parameter is bounded by `Fn(ArgTypes) -> Ret`, stating arity + signature, combined
+  with effect bounds (`F: Fn(T) -> U + Pure`). Bare `fn(T) -> U` remains the concrete function-pointer *type*; the `Fn`
+  *bound* additionally admits closures while staying monomorphized (`design.md` §17.6). `FnMut`/`FnOnce` are inferred by
+  sema — not user-writeable.
 
 ### 5.3 Const generics
 
-A `const_param` (`N: usize`) is a **type-level constant** for array/vector/tile/matrix/tensor
-dimensions.
+A `const_param` (`N: usize`) is a **type-level constant** for array/vector/tile/matrix/tensor dimensions.
 
 ```ebnf
 const_param      = IDENT ":" const_param_type ;
 const_param_type = "usize" | "isize" | "Bool" | qualified_ident ;  (* qualified = enum-valued *)
 ```
 
-v1 const-parameter kinds: `usize`, `isize`, `Bool`, enum values — **no** arbitrary compile-time
-expressions. A const generic passed as a `generic_arg` is a **literal or a bare parameter reference
-only**: an `INT_LIT`/`BOOL_LIT`/enum value, or a const-parameter name (§4 `generic_type`).
-Arithmetic on const generics (`[N + 1]`, `Matrix[T, M, K*2]`) is **not valid in v1** and is a
-diagnostic; reusing the same parameter across positions (`M`, `K`, `N`) is a reference, not an
-expression, and is fine. Restricted const expressions with overflow checking are **v2**
+v1 const-parameter kinds: `usize`, `isize`, `Bool`, enum values — **no** arbitrary compile-time expressions. A const
+generic passed as a `generic_arg` is a **literal or a bare parameter reference only**: an `INT_LIT`/`BOOL_LIT`/enum
+value, or a const-parameter name (§4 `generic_type`). Arithmetic on const generics (`[N + 1]`, `Matrix[T, M, K*2]`) is
+**not valid in v1** and is a diagnostic; reusing the same parameter across positions (`M`, `K`, `N`) is a reference, not
+an expression, and is fine. Restricted const expressions with overflow checking are **v2**
 (`design.md` §17.5/§17.12).
 
-- **`usize`/`isize` are const-generic parameter kinds only.** They are **not** runtime value types
-  and cannot be used as ordinary variable/field/parameter types in v1 — that role stays with the
-  fixed-width `Int8…UInt64` set (§4), preserving fixed-width determinism (no bare `int`/`uint`
+- **`usize`/`isize` are const-generic parameter kinds only.** They are **not** runtime value types and cannot be used as
+  ordinary variable/field/parameter types in v1 — that role stays with the fixed-width `Int8…UInt64` set (§4),
+  preserving fixed-width determinism (no bare `int`/`uint`
   re-entering through a target-width type). Runtime lengths remain `Int64`/`UInt64`; `usize`/`isize`
   exist purely to write ergonomic dimension parameters like `[N: usize]`.
 
@@ -470,31 +460,30 @@ fn MatMul[T: Numeric, M: usize, K: usize, N: usize](
     a: Matrix[T, M, K], b: Matrix[T, K, N]) -> Matrix[T, M, N]
 ```
 
-Const-generic dimensions feed Vākya's shape algebra so shape compatibility (`cols(a) == rows(b)`) is
-provable at compile time (`design.md` §7a.5 / §17.5), not deferred to runtime.
+Const-generic dimensions feed Vākya's shape algebra so shape compatibility (`cols(a) == rows(b)`) is provable at compile
+time (`design.md` §7a.5 / §17.5), not deferred to runtime.
 
 ### 5.6 Extern function declarations (`@host.link`)
 
-`extern fn` is a **body-less** function declaration that binds a crank name to a registered host
-function. The `@host.link("name")` attribute specifies the qualified host symbol to bind. Analysis
-verifies the symbol is registered in the context's host function table and that arity matches
-(§X in `crank.md`).
+`extern fn` is a **body-less** function declaration that binds a crank name to a registered host function. The
+`@host.link("name")` attribute specifies the qualified host symbol to bind. Analysis verifies the symbol is registered
+in the context's host function table and that arity matches (§X in `crank.md`).
 
 ```ebnf
 extern_fn_decl = "@host.link" "(" STRING_LIT ")" "extern" "fn" IDENT
                  "(" [ params ] ")" [ "->" type ] ;
 ```
 
-- `@host.link("qualified.name")` must appear immediately before the `extern fn` — no other
-  attributes between them (parsed as part of the extern declaration, not as a general attribute).
-  The string is the **host-side** qualified name registered via `ctx.register_function<"name", fn>()`.
-- The `fn` body is **absent** — the parser rejects a `{…}` block following an `extern fn`.
-  Analysis emits `CRANK-EXT-010` if the host symbol is not registered, `CRANK-EXT-011` if the
-  declared arity does not match the registered descriptor.
+- `@host.link("qualified.name")` must appear immediately before the `extern fn` — no other attributes between them
+  (parsed as part of the extern declaration, not as a general attribute). The string is the **host-side** qualified name
+  registered via `ctx.register_function<"name", fn>()`.
+- The `fn` body is **absent** — the parser rejects a `{…}` block following an `extern fn`. Analysis emits
+  `CRANK-EXT-010` if the host symbol is not registered, `CRANK-EXT-011` if the declared arity does not match the
+  registered descriptor.
 - Generics on `extern fn` are not supported in v1 — a `generic_params` clause is a diagnostic.
-- Effect attributes (`@pure`, `@reads`, `@writes`, …) may precede `@host.link`; they are
-  validated against the registered host descriptor's effect mask (§X). Effect escalation (declaring
-  fewer effects than the host function provides) emits `CRANK-EXT-012`.
+- Effect attributes (`@pure`, `@reads`, `@writes`, …) may precede `@host.link`; they are validated against the
+  registered host descriptor's effect mask (§X). Effect escalation (declaring fewer effects than the host function
+  provides) emits `CRANK-EXT-012`.
 
 ```crank
 @host.link("math.dot")
@@ -505,10 +494,9 @@ extern fn Dot(a: Vec3, b: Vec3) -> Float32
 extern fn Cross(a: Vec3, b: Vec3) -> Vec3
 ```
 
-lexy mapping: `dsl::keyword<"extern">` → peek `dsl::keyword<"fn">` → IDENT + params + optional
-return type (no block). The `@host.link` attribute is parsed by the §3.6 attribute production
-with name `"host.link"` (a namespaced qualified attr); the `extern_fn_decl` production validates
-that the immediately following token is `extern`.
+lexy mapping: `dsl::keyword<"extern">` → peek `dsl::keyword<"fn">` → IDENT + params + optional return type (no block).
+The `@host.link` attribute is parsed by the §3.6 attribute production with name `"host.link"` (a namespaced qualified
+attr); the `extern_fn_decl` production validates that the immediately following token is `extern`.
 
 ---
 
@@ -631,13 +619,13 @@ ctor_pattern    = qualified_ident [ "(" pattern { "," pattern } ")" ] ; (* Resul
 binding_pattern = IDENT ;
 ```
 
-`match` is **exhaustive** over `enum`/`Result`/`Option`; a non-exhaustive match is a compile
-diagnostic (unless a `_` arm is present).
+`match` is **exhaustive** over `enum`/`Result`/`Option`; a non-exhaustive match is a compile diagnostic (unless a `_`
+arm is present).
 
 ### 6.2 Transactions
 
-`transaction { … }` runs its body as a transactional-memory transaction on the **Medha** substrate
-(full semantics in `design.md` §Transactional Memory via Medha). The optional argument list sets a
+`transaction { … }` runs its body as a transactional-memory transaction on the **Medha** substrate (full semantics in
+`design.md` §Transactional Memory via Medha). The optional argument list sets a
 `TransactionOptions` (`design.md` §7c.2) — each `transaction_arg` maps 1:1 onto a `medha::options`
 field; omitted args take Medha's defaults (`isolation = snapshot`, `retry = 0`,
 `conflict = optimistic`, `replay = unknown`, `partial = require_atomic_coordinator`,
@@ -684,8 +672,8 @@ let result = transaction {
 ```
 
 A `transaction { … }` is an **expression** of type `CommitReport` (design.md §7c.2a): bind it with
-`let report = transaction { … }` to keep the report (attempts/conflicts/telemetry), or use it as a
-bare statement to discard the report. On failure control never falls through — the `TxError`
+`let report = transaction { … }` to keep the report (attempts/conflicts/telemetry), or use it as a bare statement to
+discard the report. On failure control never falls through — the `TxError`
 propagates per §7c.3.
 
 Grammar-level constraints (enforced in semantic analysis, see `design.md` §7c for the full rules):
@@ -696,22 +684,22 @@ Grammar-level constraints (enforced in semantic analysis, see `design.md` §7c f
 - **Retry/replay pairing (§7c.5).** `retry = N` with `N > 0` requires
   `replay ∈ { body_idempotent, body_and_effects_idempotent, unknown_but_retry_allowed }`.
   `replay = non_idempotent` or bare `replay = unknown` with `retry > 0` is a compile diagnostic.
-- **Transactional-resource writes only.** `resource[key] = value` inside a `transaction` is legal
-  only if `resource`'s host type is registered transactional (`medha::resource_traits<R>`);
-  writing a non-transactional resource is a compile diagnostic.
-- **Cross-resource serializable (§7c.4).** `transaction(isolation = serializable)` touching **more
-  than one** transactional resource is a compile diagnostic in v1 (no cross-resource coordinator);
-  single-resource serializable and any-resource `snapshot` are allowed.
-- **`old(resource[key])` needs snapshot capability (§7c.4).** legal only if the resource is
-  snapshot-capable (`resource_traits<R>::supports_snapshot`); otherwise a compile
-  diagnostic. `old` over a pure local needs no capability.
+- **Transactional-resource writes only.** `resource[key] = value` inside a `transaction` is legal only if `resource`'s
+  host type is registered transactional (`medha::resource_traits<R>`); writing a non-transactional resource is a compile
+  diagnostic.
+- **Cross-resource serializable (§7c.4).** `transaction(isolation = serializable)` touching **more than one**
+  transactional resource is a compile diagnostic in v1 (no cross-resource coordinator); single-resource serializable and
+  any-resource `snapshot` are allowed.
+- **`old(resource[key])` needs snapshot capability (§7c.4).** legal only if the resource is snapshot-capable
+  (`resource_traits<R>::supports_snapshot`); otherwise a compile diagnostic. `old` over a pure local needs no
+  capability.
 - **Concurrency restrictions (v1, §7c.6).** `await`, `spawn`, a nested `transaction` under
   `@parallel`, and GPU lowering of a transaction body are **rejected** inside a `transaction`
-  (Medha's `transaction_context` is thread-affine in v1). Same-thread nested `transaction` blocks
-  are allowed and flatten into the parent.
-- **Failure propagation (§7c.3).** A non-committed transaction yields a `TxError` (a structured
-  error record, not an enum); in a `fn -> Result[T, E: FromTxError]` it becomes `Result.Err`,
-  otherwise the function must select `@on_safety_failure(trap|terminate|host_handler)` or the
+  (Medha's `transaction_context` is thread-affine in v1). Same-thread nested `transaction` blocks are allowed and
+  flatten into the parent.
+- **Failure propagation (§7c.3).** A non-committed transaction yields a `TxError` (a structured error record, not an
+  enum); in a `fn -> Result[T, E: FromTxError]` it becomes `Result.Err`, otherwise the function must select
+  `@on_safety_failure(trap|terminate|host_handler)` or the
   `transaction` is a compile diagnostic (same rule as `SafetyError`, `design.md` §7b.3).
 - **`abort` scope (§2.3).** `abort(error)` is a contextual statement — a compile diagnostic if used outside a
   transaction body. The error argument is any expression assignable to `TxError`.
@@ -722,8 +710,8 @@ Grammar-level constraints (enforced in semantic analysis, see `design.md` §7c f
 
 ## 7. Expressions
 
-Precedence, lowest → highest (binds tighter downward). This table is the single source of truth
-for the lexy `expression` production (§8.3).
+Precedence, lowest → highest (binds tighter downward). This table is the single source of truth for the lexy
+`expression` production (§8.3).
 
 | Lvl | Operators                          | Assoc   | Notes                         |
 |-----|------------------------------------|---------|-------------------------------|
@@ -807,17 +795,17 @@ builtin_name  = "len" ;
 (* they parse as plain call expressions (qualified_ident + call_suffix).            *)
 ```
 
-- `as` is **checked** conversion between fixed-width types; narrowing that loses information at a
-  compile-time-known constant is a diagnostic, at runtime returns via the guard path
-  (`design.md` §Safety). No implicit conversions anywhere.
-- Comparison operators do **not** chain (`a < b < c` is a syntax error) — removes a common bug
-  class and simplifies the precedence-climbing parser.
+- `as` is **checked** conversion between fixed-width types; narrowing that loses information at a compile-time-known
+  constant is a diagnostic, at runtime returns via the guard path (`design.md` §Safety). No implicit conversions
+  anywhere.
+- Comparison operators do **not** chain (`a < b < c` is a syntax error) — removes a common bug class and simplifies the
+  precedence-climbing parser.
 
 ### 7.5 Predicate Sublanguage (`pred_expr`)
 
-Predicates appear in refinement types (`{ x: T | pred }`), function contracts
-(`requires`/`ensures`), and `assert` statements. `pred_expr` is a **pure, total,
-side-effect-free** subset of expressions — it is what crank hands to Tarka to build a
+Predicates appear in refinement types (`{ x: T | pred }`), function contracts (`requires`/`ensures`), and `assert`
+statements. `pred_expr` is a **pure, total, side-effect-free** subset of expressions — it is what crank hands to Tarka
+to build a
 `tarka::Term` (see `design.md` §Verification-in-the-Language).
 
 ```ebnf
@@ -849,20 +837,20 @@ ranged_binder= IDENT "in" range_expr ;                   (* forall i in 0..len(x
 
 Rules:
 
-- Only **pure** calls are allowed inside a predicate (`@pure` fns, `len`, arithmetic, field/index).
-  Any effectful call is a diagnostic — predicates must lower cleanly to SMT terms.
+- Only **pure** calls are allowed inside a predicate (`@pure` fns, `len`, arithmetic, field/index). Any effectful call
+  is a diagnostic — predicates must lower cleanly to SMT terms.
 - The special identifier `result` is bound to the return value inside an `ensures` predicate.
-- `old(expr)` (reserved builtin) refers to a value at function entry inside `ensures` (framing).
-  Inside a `transaction` block, `old(expr)` refers to `expr` evaluated at **transaction entry** (the
-  first transactional read snapshot), per Medha snapshot semantics — and `old(resource[key])`
+- `old(expr)` (reserved builtin) refers to a value at function entry inside `ensures` (framing). Inside a `transaction`
+  block, `old(expr)` refers to `expr` evaluated at **transaction entry** (the first transactional read snapshot), per
+  Medha snapshot semantics — and `old(resource[key])`
   requires the resource to be **snapshot-capable**
-  (`medha::resource_traits<R>::supports_snapshot`); otherwise it is a compile diagnostic (design.md
-  §7c.4). Outside these two contexts —
+  (`medha::resource_traits<R>::supports_snapshot`); otherwise it is a compile diagnostic (design.md §7c.4). Outside
+  these two contexts —
   `ensures` predicates and transaction bodies — `old(expr)` is a diagnostic.
-- Quantifiers map to Tarka/Z3 `forall`/`exists`; unbounded quantifiers over infinite domains are
-  accepted syntactically but may return `unknown` from the solver → treated per verification policy:
-  `@verify(static) assert` unknown = compile error; plain `assert` unknown = runtime guard where
-  expressible, else error.
+- Quantifiers map to Tarka/Z3 `forall`/`exists`; unbounded quantifiers over infinite domains are accepted syntactically
+  but may return `unknown` from the solver → treated per verification policy:
+  `@verify(static) assert` unknown = compile error; plain `assert` unknown = runtime guard where expressible, else
+  error.
 - Quantified predicates must have **pure, total** bodies (`CRANK-Q-004` if an effectful call or `?`
   appears inside a predicate). Bodies lowering to non-canonical proof terms are rejected.
 
@@ -898,8 +886,8 @@ From[E]` (the `From`-based residual conversion). There is no generalized `Try` t
 continuation across a newline is covered by the existing ASI carve-out for `.` after
 `)`/`]`/`}`.
 
-**Prelude form (`Type.try_from`):** For explicit `Result`-returning conversion without a guard,
-the prelude exposes `Type.try_from(value) -> Result[Type, ConversionError]`. Distinct from `as`:
+**Prelude form (`Type.try_from`):** For explicit `Result`-returning conversion without a guard, the prelude exposes
+`Type.try_from(value) -> Result[Type, ConversionError]`. Distinct from `as`:
 `as` inserts a proof/guard per the active safety policy; `try_from` always returns a `Result`.
 
 ### 7.7 Closures
@@ -931,20 +919,20 @@ let unit   = || 42                                      // zero-param pipe closu
 | move-only                          | moved into the closure          |
 | borrow that may escape owner scope | **rejected** (`CRANK-CLOS-001`) |
 
-Callability class is inferred: consuming capture → `FnOnce`; mutable capture → `FnMut`; else `Fn`.
-These classes are internal; user-facing `FnMut`/`FnOnce` bounds are gated (grammar §5.2).
+Callability class is inferred: consuming capture → `FnOnce`; mutable capture → `FnMut`; else `Fn`. These classes are
+internal; user-facing `FnMut`/`FnOnce` bounds are gated (grammar §5.2).
 
-`spawn expr` requires the operand's captured values to be transfer-safe (thread-safe,
-lifetime-safe, move/copy-safe, no unsynchronized mutable alias). Violation → `CRANK-SPAWN-001`.
+`spawn expr` requires the operand's captured values to be transfer-safe (thread-safe, lifetime-safe, move/copy-safe, no
+unsynchronized mutable alias). Violation → `CRANK-SPAWN-001`.
 
 ---
 
 ## 8. lexy Mapping
 
-lexy (`dependencies/lexy/include`) is the sole parser. Crank uses lexy's **rule DSL** for the
-fixed grammar and lexy's **`dsl::expression` / Pratt operator** support (`lexy/dsl/expression.hpp`,
-`lexy/dsl/operator.hpp`) for §7 precedence. Output is a lexy `parse_tree` that the crank frontend
-walks to build the Vākya AST (see `design.md` §Frontend / Parse phase).
+lexy (`dependencies/lexy/include`) is the sole parser. Crank uses lexy's **rule DSL** for the fixed grammar and lexy's
+**`dsl::expression` / Pratt operator** support (`lexy/dsl/expression.hpp`,
+`lexy/dsl/operator.hpp`) for §7 precedence. Output is a lexy `parse_tree` that the crank frontend walks to build the
+Vākya AST (see `design.md` §Frontend / Parse phase).
 
 ### 8.1 Production ↔ lexy header map
 
@@ -974,44 +962,43 @@ walks to build the Vākya AST (see `design.md` §Frontend / Parse phase).
 
 ### 8.2 Production skeleton (illustrative, not code)
 
-Each nonterminal maps to a lexy `struct <Name> { static constexpr auto rule = …; };`. The frontend
-defines one production struct per §2–§7 nonterminal. Whitespace is set once via a
+Each nonterminal maps to a lexy `struct <Name> { static constexpr auto rule = …; };`. The frontend defines one
+production struct per §2–§7 nonterminal. Whitespace is set once via a
 `whitespace` member on the root production and inherited.
 
 ### 8.3 Expression via `dsl::expression`
 
-The §7 table is encoded as nested lexy `operation` structs, one per precedence level, ordered so
-lexy's Pratt engine binds level 10 (`* / %`) tighter than level 9 (`+ -`), etc. Left-associative
-levels use `dsl::infix_op_left`; `unary_expr` uses `dsl::prefix_op`; postfix call/index/field use
-`dsl::postfix_op`. The range operators `..`/`..=` are a level-7 `infix_op_left` (looser than shift,
-tighter than bitwise-and), so `a..b` and `a..=b` are ordinary expressions. `as` is a level-11 left
-`infix_op_left` whose RHS is a `type` production, not an `expr` (special-cased). Non-chaining
-comparison (level 3) is enforced by making it a `dsl::infix_op_single` (single, non-associative) so
+The §7 table is encoded as nested lexy `operation` structs, one per precedence level, ordered so lexy's Pratt engine
+binds level 10 (`* / %`) tighter than level 9 (`+ -`), etc. Left-associative levels use `dsl::infix_op_left`;
+`unary_expr` uses `dsl::prefix_op`; postfix call/index/field use
+`dsl::postfix_op`. The range operators `..`/`..=` are a level-7 `infix_op_left` (looser than shift, tighter than
+bitwise-and), so `a..b` and `a..=b` are ordinary expressions. `as` is a level-11 left
+`infix_op_left` whose RHS is a `type` production, not an `expr` (special-cased). Non-chaining comparison (level 3) is
+enforced by making it a `dsl::infix_op_single` (single, non-associative) so
 `a<b<c` fails to parse.
 
 ### 8.4 Automatic Semicolon Insertion (ASI)
 
 Crank has no visible statement terminator. ASI is implemented at the lexy layer:
 
-1. A `context_flag` `line_continues` is **set** whenever the last significant token on a line is a
-   binary operator, `,`, or an unclosed opening bracket (tracked by lexy's bracket productions).
-2. At a `NEWLINE`, if `line_continues` is clear **and** bracket depth is zero, the frontend emits a
-   synthetic statement terminator into the token stream; otherwise the newline is trivia.
-3. Inside `( )` / `[ ]` (function calls, slice literals, multi-line expressions) newlines are
-   always trivia — bracket depth suppresses ASI.
-4. **`else` carve-out**: a synthetic terminator is *not* inserted after a `}` when the next
-   significant token is `else` — so `}` and `else` may sit on separate lines (§10.1). Same rule
-   applies to the `.` of a postfix chain continued on the next line after `)`/`]`/`}`.
+1. A `context_flag` `line_continues` is **set** whenever the last significant token on a line is a binary operator, `,`,
+   or an unclosed opening bracket (tracked by lexy's bracket productions).
+2. At a `NEWLINE`, if `line_continues` is clear **and** bracket depth is zero, the frontend emits a synthetic statement
+   terminator into the token stream; otherwise the newline is trivia.
+3. Inside `( )` / `[ ]` (function calls, slice literals, multi-line expressions) newlines are always trivia — bracket
+   depth suppresses ASI.
+4. **`else` carve-out**: a synthetic terminator is *not* inserted after a `}` when the next significant token is
+   `else` — so `}` and `else` may sit on separate lines (§10.1). Same rule applies to the `.` of a postfix chain
+   continued on the next line after `)`/`]`/`}`.
 
-This mirrors Go's rule set but is expressed declaratively through lexy context state rather than a
-hand-written scanner. See gap `G-LEX-2` in `design.md` if lexy context-flag ergonomics prove
-insufficient.
+This mirrors Go's rule set but is expressed declaratively through lexy context state rather than a hand-written scanner.
+See gap `G-LEX-2` in `design.md` if lexy context-flag ergonomics prove insufficient.
 
 ### 8.5 Diagnostics
 
-lexy `error` productions carry a stable string code + `source_span`. The frontend maps every lexy
-error into a `vakya::diag::diagnostic` (or `lithe::diag::diagnostic`) so parse, semantic, and
-backend diagnostics share one sink (`design.md` §Diagnostics). Error recovery synchronizes on
+lexy `error` productions carry a stable string code + `source_span`. The frontend maps every lexy error into a
+`vakya::diag::diagnostic` (or `lithe::diag::diagnostic`) so parse, semantic, and backend diagnostics share one sink
+(`design.md` §Diagnostics). Error recovery synchronizes on
 `NEWLINE` / `}` so one syntax error does not cascade.
 
 ---
@@ -1193,77 +1180,74 @@ Cross-referenced in `design.md` §Library Gaps where they touch framework code.
 ### 10.1 Resolved (normative)
 
 - **Integer overflow.** Signed and unsigned fixed-width arithmetic **wraps** (two's-complement)
-  by default — this matches Lithe MIR integer ops (`reference.md`: "MIR integer ops are wrapping
-  two's-complement"), so the surface language and the IR agree with zero lowering surprise. A
-  checked form is available per-operation via host builtins (`add_checked`/`mul_checked` →
-  `Result[T, Overflow]`) and a module-level `@overflow(checked)` attribute flips the default to
-  trap for a scope. No undefined behavior in either mode.
-- **Division / modulo by zero.** Integer `/` and `%` by zero is a **runtime guard** (same
-  machinery as bounds): the compiler emits the obligation `divisor != 0`; proven → no check;
-  unknown → guard; refuted (constant `0`) → compile error. A failed runtime guard follows the
-  function's `safety_failure` policy (design.md §Safety-Failure Policy). Float division by zero
-  follows IEEE-754 (`inf`/`nan`, no trap).
+  by default — this matches Lithe MIR integer ops (`reference.md`: "MIR integer ops are wrapping two's-complement"), so
+  the surface language and the IR agree with zero lowering surprise. A checked form is available per-operation via host
+  builtins (`add_checked`/`mul_checked` →
+  `Result[T, Overflow]`) and a module-level `@overflow(checked)` attribute flips the default to trap for a scope. No
+  undefined behavior in either mode.
+- **Division / modulo by zero.** Integer `/` and `%` by zero is a **runtime guard** (same machinery as bounds): the
+  compiler emits the obligation `divisor != 0`; proven → no check; unknown → guard; refuted (constant `0`) → compile
+  error. A failed runtime guard follows the function's `safety_failure` policy (design.md §Safety-Failure Policy). Float
+  division by zero follows IEEE-754 (`inf`/`nan`, no trap).
 - **`as` conversions (signed/unsigned/narrowing).** `as` is **checked and explicit**:
     - widening (e.g. `Int32 as Int64`) is always lossless, no guard.
-    - narrowing (`Int64 as Int32`) and sign-change (`Int32 as UInt32`) that would lose information
-      emit a `value-in-range` obligation: constant out of range → compile error; runtime unknown →
-      guard (per `safety_failure`). Two's-complement reinterpretation is **not** implicit — request
-      it with the `bitcast[T](x)` host builtin.
+    - narrowing (`Int64 as Int32`) and sign-change (`Int32 as UInt32`) that would lose information emit a
+      `value-in-range` obligation: constant out of range → compile error; runtime unknown → guard (per
+      `safety_failure`). Two's-complement reinterpretation is **not** implicit — request it with the `bitcast[T](x)`
+      host builtin.
     - `Float ↔ Int` uses round-toward-zero with a range guard; out-of-range → guard.
-- **`else` on a new line.** `}` `else` on separate lines is **allowed**. ASI (§8.4) suppresses the
-  synthetic terminator after a `}` that is immediately followed (modulo trivia/newlines) by
-  `else` — so both `} else {` and `}⏎else {` parse identically. This is a specific ASI carve-out,
-  mirroring the operator/comma/open-bracket continuation rules.
-- **`defer` accepts calls only.** Grammar §6 restricts `defer` to `call_expr`. Rationale + full
-  runtime semantics: design.md §Runtime/`defer`.
-- **`Result.Ok` / `Option.Some` etc.** These are **built-in enum constructor syntax**, not ordinary
-  function calls. `Result`/`Option` are predeclared `enum`s; `Result.Ok(x)`, `Result.Err(e)`,
-  `Option.Some(x)`, `Option.None`, and any user `Enum.Variant(...)` parse as `ctor_pattern`-shaped
-  constructor expressions (a `qualified_ident` naming `Type.Variant` in call/nullary position). The
-  type checker resolves them against the enum's variants — they are not looked up in the value
-  namespace, so a user cannot shadow `Ok` with a function.
-- **`parallel.map/reduce/for` (prelude functions).** These former grammar builtins are now prelude
-  functions — they parse as plain call expressions (`qualified_ident` + call suffix). Loops with
+- **`else` on a new line.** `}` `else` on separate lines is **allowed**. ASI (§8.4) suppresses the synthetic terminator
+  after a `}` that is immediately followed (modulo trivia/newlines) by
+  `else` — so both `} else {` and `}⏎else {` parse identically. This is a specific ASI carve-out, mirroring the
+  operator/comma/open-bracket continuation rules.
+- **`defer` accepts calls only.** Grammar §6 restricts `defer` to `call_expr`. Rationale + full runtime semantics:
+  design.md §Runtime/`defer`.
+- **`Result.Ok` / `Option.Some` etc.** These are **built-in enum constructor syntax**, not ordinary function calls.
+  `Result`/`Option` are predeclared `enum`s; `Result.Ok(x)`, `Result.Err(e)`,
+  `Option.Some(x)`, `Option.None`, and any user `Enum.Variant(...)` parse as `ctor_pattern`-shaped constructor
+  expressions (a `qualified_ident` naming `Type.Variant` in call/nullary position). The type checker resolves them
+  against the enum's variants — they are not looked up in the value namespace, so a user cannot shadow `Ok` with a
+  function.
+- **`parallel.map/reduce/for` (prelude functions).** These former grammar builtins are now prelude functions — they
+  parse as plain call expressions (`qualified_ident` + call suffix). Loops with
   `@parallel` lower through Lithe for automatic parallelization via Pravaha. No `import "parallel"`
   is required; the names are resolved through the prelude binding.
-- **`transaction` lowers to Medha.** The `transaction` block (§6.2) is a language keyword, not a
-  library call; it is an **expression** yielding `CommitReport` (design.md §7c.2a) and lowers onto
-  the Medha substrate (`design.md` §7c). Medha is a **required** crank
-  runtime component. Transaction option words (`isolation`/`retry`/`replay`/`conflict`/`partial`/
+- **`transaction` lowers to Medha.** The `transaction` block (§6.2) is a language keyword, not a library call; it is an
+  **expression** yielding `CommitReport` (design.md §7c.2a) and lowers onto the Medha substrate (`design.md` §7c). Medha
+  is a **required** crank runtime component. Transaction option words (`isolation`/`retry`/`replay`/`conflict`/
+  `partial`/
   `distribution` and their values) are **contextual** — reserved only inside a `transaction(...)`
-  argument list. `distribution = none` (alias `local`) is the only v1 mode (Medha is local-process);
-  the other `distribution` values (`shard`/`replicated`) are reserved v2 metadata. Transactional resource indexing,
-  retry/replay
-  pairing, effect admission, and the v1 concurrency restrictions (`await`/`spawn`/`@parallel`/GPU
-  forbidden in a tx body) are all specified in `design.md` §7c.
+  argument list. `distribution = none` (alias `local`) is the only v1 mode (Medha is local-process); the other
+  `distribution` values (`shard`/`replicated`) are reserved v2 metadata. Transactional resource indexing, retry/replay
+  pairing, effect admission, and the v1 concurrency restrictions (`await`/`spawn`/`@parallel`/GPU forbidden in a tx
+  body) are all specified in `design.md` §7c.
 
 ### 10.2 Open / deferred
 
 - **Generics surface**: v1 supports monomorphized generics with **multiple trait bounds**
-  (`[T: Numeric + Copy]`), explicit `trait`/`impl` conformance, ownership traits
-  (`Copy`/`Clone`/`Move`/`Drop`), **callable bounds** (`Fn(T) -> U`), the coherence/orphan rule, and
-  **basic const generics** for dimensions (`[N: usize]`, literal/parameter references only) — full
-  model in `design.md` §17. **Associated types** + projection syntax (`R.Key`), generic modules,
-  shape/layout constraints, type specialization, and const-generic expressions are **v2**;
-  higher-kinded types, variance, and type-level functions are **v3 / out of scope for v1** (§17.12).
-- **Operator overloading**: not in the surface language (keeps precedence table closed and hetero
-  codegen predictable). Host C++ ops are exposed as named functions.
+  (`[T: Numeric + Copy]`), explicit `trait`/`impl` conformance, ownership traits (`Copy`/`Clone`/`Move`/`Drop`),
+  **callable bounds** (`Fn(T) -> U`), the coherence/orphan rule, and **basic const generics** for dimensions
+  (`[N: usize]`, literal/parameter references only) — full model in `design.md` §17. **Associated types** + projection
+  syntax (`R.Key`), generic modules, shape/layout constraints, type specialization, and const-generic expressions are
+  **v2**; higher-kinded types, variance, and type-level functions are **v3 / out of scope for v1** (§17.12).
+- **Operator overloading**: not in the surface language (keeps precedence table closed and hetero codegen predictable).
+  Host C++ ops are exposed as named functions.
 - **String interpolation**: deferred; use `+` concatenation or a host `format` function in v1.
 - **`defer`**: parses in v1; lowering is scoped-cleanup only (no exceptions to unwind), see
   `design.md` §Runtime.
-- **Predicate implication `->`**: inside `pred_expr`, `p -> q` reads as logical implication
-  (desugars to `!p || q`). The token `->` is otherwise the return-type arrow; disambiguated by
-  context (only valid inside a predicate). If lexy context-sensitivity proves awkward, a dedicated
+- **Predicate implication `->`**: inside `pred_expr`, `p -> q` reads as logical implication (desugars to `!p || q`). The
+  token `->` is otherwise the return-type arrow; disambiguated by context (only valid inside a predicate). If lexy
+  context-sensitivity proves awkward, a dedicated
   `==>` implication token is the fallback (see `design.md` gap `G-LEX-3`).
 - **Proof-surface scope (v1)**: refinement types, `requires`/`ensures`, `assert` (with `@verify(static)` for mandatory
   proof),
   `forall`/`exists`, `result`/`old`. Loop invariants (`invariant` clause on `for`/`while`) and
   `decreases` termination measures are designed but deferred to v2 (noted in `design.md`
   §Verification-in-the-Language).
-- **Transaction scope (v1)**: `transaction` blocks are single-thread, `distribution = none` only.
-  Distributed transactions, cross-resource atomic commit beyond a single resource's
-  `commit_capability`, and Pravaha-scheduled replay-safe attempts are designed but opt-in /
-  deferred (Medha exposes the distributed `tx_status` values + adapters as metadata only in v1;
+- **Transaction scope (v1)**: `transaction` blocks are single-thread, `distribution = none` only. Distributed
+  transactions, cross-resource atomic commit beyond a single resource's
+  `commit_capability`, and Pravaha-scheduled replay-safe attempts are designed but opt-in / deferred (Medha exposes the
+  distributed `tx_status` values + adapters as metadata only in v1;
   `design.md` §7c.6/§7c.7).
 
 ```
@@ -1287,13 +1271,13 @@ scope_spawn_expr= IDENT "." "spawn" "(" [ expr ] ")" ;    (* bounded spawn; chil
 scope_cancel_expr = IDENT "." "cancel" "(" ")" ;          (* signal cancellation to all children *)
 ```
 
-- AST tag: `vakya::task_scope`, `vakya::deadline`, `vakya::scope_spawn` (spawn/cancel are method-call
-  nodes on the scope binding).
+- AST tag: `vakya::task_scope`, `vakya::deadline`, `vakya::scope_spawn` (spawn/cancel are method-call nodes on the scope
+  binding).
 - Feature flag: `structured_concurrency`. Diagnostic when disabled: `CRANK-CONC-001`
   (structured concurrency requires v2).
 - Lowering: `task_scope` lowers to a Pravaha join-group with scope-lifetime enforcement;
-  `scope.spawn` captures by value and registers a child bounded by the group; `deadline(d)` arms a
-  wall-clock cancel via `crank_future_error::cancelled`. See `crank.md` §v2.9.
+  `scope.spawn` captures by value and registers a child bounded by the group; `deadline(d)` arms a wall-clock cancel via
+  `crank_future_error::cancelled`. See `crank.md` §v2.9.
 
 ### 11.2 Savepoints & compensation — `savepoint` / `rollback_to` / `compensate` (§v2.12)
 
@@ -1305,9 +1289,9 @@ compensate_block  = "compensate" block ;                  (* post-commit compens
 
 - AST tag: `vakya::savepoint`, `vakya::rollback_to`, `vakya::compensate`.
 - Feature flag: `nested_transactions`. Diagnostic when disabled: `CRANK-TX-SP-001`
-  (savepoints/compensation require v2). `compensate` additionally: it is a **post-commit** hook, must
-  be **idempotent**, and may **not** perform irreversible effects (reuses the §7c.5 irreversible-effect
-  rule) — a `compensate` block that performs an irreversible effect is a diagnostic.
+  (savepoints/compensation require v2). `compensate` additionally: it is a **post-commit** hook, must be **idempotent**,
+  and may **not** perform irreversible effects (reuses the §7c.5 irreversible-effect rule) — a `compensate` block that
+  performs an irreversible effect is a diagnostic.
 - Lowering: `savepoint()` → `tx_journal::make_savepoint`; `rollback_to(sp)` → `tx_journal::rollback_to`
   (LIFO write undo); `compensate { }` registers a `compensation` in the post-commit
   `compensation_registry` (best-effort, bounded-retry, `compensation_report`). See `crank.md` §v2.12.
@@ -1320,16 +1304,15 @@ module_decl    = "module" IDENT [ generic_params ] block ;  (* generic (parametr
 
 - AST tag: `vakya::module_decl` (adds an optional `generic_params` on the existing module node).
 - Feature flag: `generic_modules`. Diagnostic when disabled: `CRANK-GEN-MOD-001`
-  (generic modules require v2). `generic_params` reuses §3 (`type_param`/`const_param`); the bound is
-  the module's public contract.
-- Lowering: each instantiation `M[Float32]` produces a monomorphized module with its own AOT cache
-  key (`module_instantiation_result`); the bound `T: Bound` is exported as the module contract. See
+  (generic modules require v2). `generic_params` reuses §3 (`type_param`/`const_param`); the bound is the module's
+  public contract.
+- Lowering: each instantiation `M[Float32]` produces a monomorphized module with its own AOT cache key
+  (`module_instantiation_result`); the bound `T: Bound` is exported as the module contract. See
   `crank.md` §v2.3.
 
 ### 11.4 Layout / Device bounds (§v2.6)
 
-Extends `bound` (§3, production at `bound = qualified_ident | callable_bound`) with two v2-gated
-constraint forms:
+Extends `bound` (§3, production at `bound = qualified_ident | callable_bound`) with two v2-gated constraint forms:
 
 ```ebnf
 bound          =/ layout_bound | device_bound ;           (* v2 extension of the §3 bound production *)
@@ -1340,13 +1323,13 @@ device_bound   = "Device" "[" IDENT "]" ;                 (* Device[Gpu] | Devic
 - AST tag: `vakya::layout_bound`, `vakya::device_bound` (bound-list entries).
 - Feature flag: `layout_device_bounds`. Diagnostic when disabled: `CRANK-GEN-BND-001`
   (layout/device bounds require v2).
-- Lowering: layout/device bounds feed the execution planner's backend ranking; an unsatisfiable
-  constraint (no adapter provides it) is a diagnostic. See `crank.md` §v2.6.
+- Lowering: layout/device bounds feed the execution planner's backend ranking; an unsatisfiable constraint (no adapter
+  provides it) is a diagnostic. See `crank.md` §v2.6.
 
 ### 11.5 v2 attributes — `@distributed` / `@reflect`
 
-These are **namespaced-style builtins gated to v2**; the §3.6 `builtin_attr` set is unchanged for v1.
-When the flag is off they diagnose rather than lower.
+These are **namespaced-style builtins gated to v2**; the §3.6 `builtin_attr` set is unchanged for v1. When the flag is
+off they diagnose rather than lower.
 
 ```ebnf
 distributed_attr = "@" "distributed" "(" distributed_arg { "," distributed_arg } ")" ;
@@ -1360,8 +1343,8 @@ reflect_facet    = "fields" | "traits" | "capabilities"
 ```
 
 - AST tag: `vakya::attr` with resolved kind `distributed` / `reflect` (facet/arg list attached).
-- Feature flags: `distributed_execution` (`@distributed`), `reflection` (`@reflect`). Diagnostics
-  when disabled: `CRANK-DIST-000` / `CRANK-REFLECT-000` (attribute requires v2).
+- Feature flags: `distributed_execution` (`@distributed`), `reflection` (`@reflect`). Diagnostics when disabled:
+  `CRANK-DIST-000` / `CRANK-REFLECT-000` (attribute requires v2).
 - Lowering: `@distributed(required=true)` → unplaceable miss is `CRANK-DIST-003` (no local fallback);
   `preferred` (default) relaxes to local with a NADI pulse (`CRANK-DIST-001`). `@reflect(facets…)`
   selects which `type_descriptor<T>` facets a `reflect_builder` emits (pay-for-use). See `crank.md`
@@ -1381,11 +1364,10 @@ transaction_distribution =/ "shard" | "replicated" ;         (* v2: non-local tx
 - AST tag: `vakya::transaction_expr` (adds `coordinator` string + extended `distribution` value).
 - Feature flag: `multi_resource_tx`. Diagnostics when disabled: `CRANK-TX-DIST-001` (non-`none`
   distribution requires v2). Related v2 semantic gates already enforced in code: `CRANK-TX-009`
-  (`distribution != none` needs a distribution adapter), `CRANK-TX-010`/`011` (coordinator
-  participant/registration), `CRANK-TX-012` (snapshot multi-resource write without a coordinator).
-- Lowering: `coordinator="name"` binds the tx to a registered multi-resource coordinator for atomic
-  commit; `distribution = shard|replicated` requires a distribution adapter (else `CRANK-DIST-010`).
-  See `crank.md` §v2.11.
+  (`distribution != none` needs a distribution adapter), `CRANK-TX-010`/`011` (coordinator participant/registration),
+  `CRANK-TX-012` (snapshot multi-resource write without a coordinator).
+- Lowering: `coordinator="name"` binds the tx to a registered multi-resource coordinator for atomic commit;
+  `distribution = shard|replicated` requires a distribution adapter (else `CRANK-DIST-010`). See `crank.md` §v2.11.
 
 ### 11.7 Domain views — `view_decl` + `view_expr` (§domain_views)
 
@@ -1401,13 +1383,13 @@ builtin_name =/ "indices" ;   (* pure const-dim range over Shape; used in view m
 
 - AST tags: `crank::view_decl_tag` (stable_id 1016), `crank::view_expr_tag` (stable_id 1017).
 - Feature flag: `domain_views`. Diagnostic when disabled: `CRANK-VIEW-000`
-  (`view` used without `domain_views` feature flag). Parse-but-gate: the grammar is always accepted
-  so the parser never breaks even when the feature is off; the analysis phase rejects with
+  (`view` used without `domain_views` feature flag). Parse-but-gate: the grammar is always accepted so the parser never
+  breaks even when the feature is off; the analysis phase rejects with
   `CRANK-VIEW-000`.
 - `"of"` is contextual — matched as a literal inside `view_decl` only; never globally reserved.
 - `indices(Shape)` is a core const-dim range builtin (not Sutra); it lowers to an ordinary loop nest.
-- Lowering: view construction → erased / base-ref / Lithe `memref_type` (§4.6 of the design);
-  view method calls → named `("lithe.hl","call")` + plan-time backend selection. No new IR op family.
-  Domain metadata (`@sutra.*`) is compile-stage ephemeral in v1; wire contract deferred to Lithe 1.6.0
+- Lowering: view construction → erased / base-ref / Lithe `memref_type` (§4.6 of the design); view method calls → named
+  `("lithe.hl","call")` + plan-time backend selection. No new IR op family. Domain metadata (`@sutra.*`) is
+  compile-stage ephemeral in v1; wire contract deferred to Lithe 1.6.0
   `domain_attr` (v2).
 - See `crank.md` §Domain Views for full semantics.

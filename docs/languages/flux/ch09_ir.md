@@ -2,8 +2,8 @@
 
 ## Theory
 
-After optimization, the Vakya tree is **lowered to MIR** (Medium-level Intermediate Representation).
-MIR is a flat, sequential instruction format that backends can compile to native code.
+After optimization, the Vakya tree is **lowered to MIR** (Medium-level Intermediate Representation). MIR is a flat,
+sequential instruction format that backends can compile to native code.
 
 ### MIR Structure
 
@@ -19,6 +19,7 @@ MIR Program
 ```
 
 MIR is:
+
 - **SSA form** — each value defined exactly once
 - **Typed** — every instruction has a type
 - **Backend-agnostic** — the same MIR goes to CPU, SIMD, GPU
@@ -139,8 +140,8 @@ under the hood — the same generic IR infrastructure used by Crank).
 
 ### CPU Backend
 
-The CPU backend emits portable C code or uses LLVM IR via the Lithe code generation pipeline.
-For embedded use (no LLVM), it uses an interpreter over MIR.
+The CPU backend emits portable C code or uses LLVM IR via the Lithe code generation pipeline. For embedded use (no
+LLVM), it uses an interpreter over MIR.
 
 ```cpp
 auto prog = lithe::cpu_backend::compile(mir);
@@ -149,9 +150,8 @@ float result = prog.call<float>(3.0f, 4.0f);  // distance(3,4) = 5
 
 ### SIMD Backend
 
-The SIMD backend emits vectorized operations using Google Highway (via Pravaha's `host_simd.hpp`).
-A scalar expression over `f32` becomes a vector operation over `f32x8` or wider, processing 8
-values in parallel.
+The SIMD backend emits vectorized operations using Google Highway (via Pravaha's `host_simd.hpp`). A scalar expression
+over `f32` becomes a vector operation over `f32x8` or wider, processing 8 values in parallel.
 
 ```cpp
 auto prog = lithe::simd_backend::compile(mir);

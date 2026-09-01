@@ -5,16 +5,15 @@
 Before we can run `sqrt(x*x + y*y)`, the compiler needs to know: *what kind of value is `x`?*
 Is it a 32-bit float? A 64-bit integer? A 1024×1024 tensor?
 
-A **type system** is the compiler's model of the *kinds of values* that expressions can produce.
-It serves three purposes:
+A **type system** is the compiler's model of the *kinds of values* that expressions can produce. It serves three
+purposes:
 
 1. **Error detection** — catch `matmul(scalar, scalar)` before it segfaults at runtime
 2. **Code selection** — choose the right machine instruction (`fadd` not `iadd`) for `x + y`
 3. **Optimization** — prove `x > 0` → `abs(x) = x`, eliminating a branch
 
-Flux uses a **static, sound type system**: every expression is assigned a type at compile time, and
-that type is guaranteed to be correct at runtime (no surprise casts, no undefined behavior from type
-confusion).
+Flux uses a **static, sound type system**: every expression is assigned a type at compile time, and that type is
+guaranteed to be correct at runtime (no surprise casts, no undefined behavior from type confusion).
 
 ---
 
@@ -75,6 +74,7 @@ fn distance(x, y) {          -- no type annotations!
 ```
 
 The compiler must deduce:
+
 1. `sqrt` expects a `f32` argument and returns `f32`
 2. `x*x + y*y` must have type `f32` (to pass to `sqrt`)
 3. `x*x` must have type `f32` (to add with `y*y`)
@@ -88,8 +88,8 @@ It reaches this conclusion without any programmer help.
 
 ### Historical context
 
-Hindley-Milner (HM) type inference was invented by Roger Hindley (1969) and independently by Robin
-Milner (1978) for the ML language. It is the foundation of the type systems in:
+Hindley-Milner (HM) type inference was invented by Roger Hindley (1969) and independently by Robin Milner (1978) for the
+ML language. It is the foundation of the type systems in:
 
 - **ML** and **OCaml** — the original
 - **Haskell** — extended with type classes
@@ -102,14 +102,15 @@ Flux uses a direct implementation of HM Algorithm W.
 
 ### The key insight: types as equations
 
-Instead of asking "what is the type of this expression?", HM asks "what type equations must hold for
-this program to be well-typed?" Then it *solves* those equations.
+Instead of asking "what is the type of this expression?", HM asks "what type equations must hold for this program to be
+well-typed?" Then it *solves* those equations.
 
 ```flux
 let distance = sqrt(x*x + y*y)
 ```
 
 Generated equations:
+
 ```
 type(x)        = α₁               -- x has some type
 type(y)        = α₂               -- y has some type
@@ -142,8 +143,8 @@ Unify(fn(α)→β, fn(f32)→f32) → σ = { α → f32, β → f32 }
 Unify(α, fn(α)→f32)     → FAIL (occurs check: α appears in fn(α)→f32)
 ```
 
-The **occurs check** prevents infinite types: if `α` appears inside `T`, then `σ = { α → T }` would
-create an infinite chain `α = fn(fn(fn(...)→f32)→f32)→f32`. We reject this.
+The **occurs check** prevents infinite types: if `α` appears inside `T`, then `σ = { α → T }` would create an infinite
+chain `α = fn(fn(fn(...)→f32)→f32)→f32`. We reject this.
 
 ### The Robinson MGU (Most General Unifier)
 
@@ -176,8 +177,8 @@ Unify(T1, T2):
 
 ### Vakya's unification: Robinson MGU + union-find
 
-Vakya implements this in `vakya/unification.hpp` using a **union-find** (disjoint-set forest) data
-structure for the substitution. Union-find gives near-O(1) variable chaining with path compression:
+Vakya implements this in `vakya/unification.hpp` using a **union-find** (disjoint-set forest) data structure for the
+substitution. Union-find gives near-O (1) variable chaining with path compression:
 
 ```
 substitution: union_find over type_var_id values
@@ -185,8 +186,8 @@ substitution: union_find over type_var_id values
   unite(α, β)  → merge two equivalence classes
 ```
 
-The `substitution::apply()` method walks a type term, replacing each variable with its current
-binding (path-splitting as it goes, amortizing future lookups).
+The `substitution::apply()` method walks a type term, replacing each variable with its current binding (path-splitting
+as it goes, amortizing future lookups).
 
 ```cpp
 // Vakya unify API — returns std::expected<subst_delta, unify_error>
@@ -202,26 +203,26 @@ if (!result) {
 // apply it: subst.apply_delta(*result)
 ```
 
-The `subst_delta` (a `SmallVector<8>`) avoids heap allocation for the common case of ≤8 new bindings
-per unification step.
+The `subst_delta` (a `SmallVector<8>`) avoids heap allocation for the common case of ≤8 new bindings per unification
+step.
 
 ---
 
 ## Algorithm W in Detail
 
-Algorithm W is Milner's bottom-up type reconstruction procedure. It processes the AST post-order
-(leaves first, root last), building up the substitution as it goes.
+Algorithm W is Milner's bottom-up type reconstruction procedure. It processes the AST post-order (leaves first, root
+last), building up the substitution as it goes.
 
 ### Notation
 
-| Symbol | Meaning |
-|--------|---------|
-| `Γ` | Type environment: name → type scheme |
-| `σ` | Substitution: type variable → type |
-| `τ` | Monomorphic type (no quantifiers) |
-| `∀ᾱ.τ` | Polymorphic type scheme (quantified over variables ᾱ) |
-| `⊢` | "entails" / "proves" |
-| `Γ ⊢ e : τ` | Under environment Γ, expression e has type τ |
+| Symbol      | Meaning                                               |
+|-------------|-------------------------------------------------------|
+| `Γ`         | Type environment: name → type scheme                  |
+| `σ`         | Substitution: type variable → type                    |
+| `τ`         | Monomorphic type (no quantifiers)                     |
+| `∀ᾱ.τ`      | Polymorphic type scheme (quantified over variables ᾱ) |
+| `⊢`         | "entails" / "proves"                                  |
+| `Γ ⊢ e : τ` | Under environment Γ, expression e has type τ          |
 
 ### Typing rules as derivation trees
 
@@ -234,9 +235,8 @@ Algorithm W is Milner's bottom-up type reconstruction procedure. It processes th
   Γ ⊢ x : τ[ᾱ → β₁,...,βₙ]
 ```
 
-When we use `x`, we *instantiate* its type scheme: replace the quantified variables with fresh ones.
-This is what allows `identity` to be both `identity(42) : i64` and `identity(3.14) : f64` — each
-call site gets a fresh type variable.
+When we use `x`, we *instantiate* its type scheme: replace the quantified variables with fresh ones. This is what allows
+`identity` to be both `identity(42) : i64` and `identity(3.14) : f64` — each call site gets a fresh type variable.
 
 #### Let bindings
 
@@ -308,6 +308,7 @@ let distance = sqrt(x*x + y*y)
 ```
 
 Inference trace:
+
 ```
 1. x : f32, y : f32  (from annotations)
 2. x*x:  Unify(f32, f32) → f32
@@ -329,6 +330,7 @@ let b = identity(3.14f)
 ```
 
 Inference trace:
+
 ```
 1. Infer identity:
    x : α₁ (fresh)
@@ -358,6 +360,7 @@ let bad = x + flag    -- ERROR: cannot add f32 and bool
 ```
 
 Inference:
+
 ```
 1. x : f32
 2. flag : bool
@@ -375,6 +378,7 @@ let result = apply(fn(n) { n * n }, 5)
 ```
 
 Inference:
+
 ```
 1. Infer apply:
    f : α, x : β (fresh)
@@ -402,6 +406,7 @@ let result =
 ```
 
 Inference:
+
 ```
 1. range(1, 10000) : vec<i64>
    (range : i64 → i64 → vec<i64>)
@@ -433,8 +438,7 @@ Inference:
 
 ## The Vakya Type System: Architecture
 
-Vakya's type system is a layered opt-in stack on top of the core expression library. You pay only for
-what you include.
+Vakya's type system is a layered opt-in stack on top of the core expression library. You pay only for what you include.
 
 ### Type terms (the language of types)
 
@@ -447,8 +451,8 @@ what you include.
     | alias(name, τ) -- named alias (expands to τ)
 ```
 
-These terms live in a `type_arena` — a hash-consed DAG. Two type terms with identical structure share
-the same memory and have the same `type_ref` handle.
+These terms live in a `type_arena` — a hash-consed DAG. Two type terms with identical structure share the same memory
+and have the same `type_ref` handle.
 
 ```cpp
 vakya::types::type_arena arena;
@@ -475,8 +479,8 @@ auto poly_id = arena.intern_quantified(forall_params, forall_body);
 
 ### Hash-consing: why two identical types are the same object
 
-`type_arena` uses **hash-consing**: before creating a new type node, it checks whether an identical
-one already exists. If so, it returns the existing handle.
+`type_arena` uses **hash-consing**: before creating a new type node, it checks whether an identical one already exists.
+If so, it returns the existing handle.
 
 ```cpp
 auto a1 = arena.intern_primitive("f32");
@@ -485,14 +489,15 @@ assert(a1.index == a2.index);   // same handle — same object
 ```
 
 This means:
-- Type equality is O(1) handle comparison (not recursive tree equality)
+
+- Type equality is O (1) handle comparison (not recursive tree equality)
 - Memory use is proportional to unique types, not type occurrences
 - The entire type universe of a typical program fits in a few kilobytes
 
 ### Substitution: the union-find
 
-During unification, we bind type variables to types. The `substitution` structure is a
-**path-splitting union-find** over `type_var_id` values:
+During unification, we bind type variables to types. The `substitution` structure is a **path-splitting union-find**
+over `type_var_id` values:
 
 ```cpp
 vakya::types::substitution subst;
@@ -505,7 +510,7 @@ auto resolved = subst.apply(alpha_ref, arena);  // returns f32_ref
 ```
 
 Path-splitting: when `α → β → f32`, the first `apply(α)` traverses the chain; subsequent calls find
-`α → f32` directly (one hop). Amortized O(α(n)) — essentially O(1).
+`α → f32` directly (one hop). Amortized O (α (n)) — essentially O (1).
 
 ---
 
@@ -759,11 +764,11 @@ private:
 
 ### Step 4: Constraint solver integration
 
-For more complex checks beyond unification (e.g., `requires gpu` capabilities, effect tracking),
-Vakya provides a `composite_solver` that routes constraints to specialized solvers.
+For more complex checks beyond unification (e.g., `requires gpu` capabilities, effect tracking), Vakya provides a
+`composite_solver` that routes constraints to specialized solvers.
 
-Flux uses the basic `unification_solver` for arithmetic and function types. Capability constraints
-flow to the `rule_constraint_solver`:
+Flux uses the basic `unification_solver` for arithmetic and function types. Capability constraints flow to the
+`rule_constraint_solver`:
 
 ```cpp
 // Capability constraint: require_gpu forces backend selection
@@ -802,6 +807,7 @@ using flux_solver = vakya::types::composite_solver<
 fn add2(x, y) { x + y }
 let bad = add2(1, 2, 3)   -- too many arguments
 ```
+
 ```
 Error: Arity mismatch calling add2
   Expected: (α, β) → γ
@@ -815,6 +821,7 @@ input x : f32
 input flag : bool
 let bad = x * flag
 ```
+
 ```
 Error: Type mismatch in operator *
   Left:  f32
@@ -827,6 +834,7 @@ Error: Type mismatch in operator *
 ```flux
 fn loop(f) { loop(f(f)) }
 ```
+
 ```
 Error: Infinite type — recursive unification
   α = α → β  (occurs check failed)
@@ -842,6 +850,7 @@ fn abs_val(x : f32) -> f32 {
     -- missing else branch
 }
 ```
+
 ```
 Error: If expression branches must have the same type
   Then branch: f32
@@ -945,24 +954,24 @@ int main() {
 
 ## What We Have
 
-| Component | Purpose |
-|-----------|---------|
-| `flux_type` | Flux-level type representation (annotations, AST nodes) |
-| `flux_annot_to_ref` | Convert Flux types → Vakya `type_ref` |
-| `type_arena` | Hash-consed DAG of type terms |
-| `type_var_generator` | Fresh type variable IDs |
-| `substitution` | Union-find variable binding (path-splitting) |
-| `unify()` | Robinson MGU → `std::expected<subst_delta, unify_error>` |
-| `type_inferrer` | Algorithm W over Flux AST |
-| Builtin schemes | Polymorphic types for `sqrt`, `map`, `filter`, `reduce`, … |
-| `composite_solver` | Route constraints to specialized solvers |
-| `type_error` | Structured error with type names for diagnostics |
+| Component            | Purpose                                                    |
+|----------------------|------------------------------------------------------------|
+| `flux_type`          | Flux-level type representation (annotations, AST nodes)    |
+| `flux_annot_to_ref`  | Convert Flux types → Vakya `type_ref`                      |
+| `type_arena`         | Hash-consed DAG of type terms                              |
+| `type_var_generator` | Fresh type variable IDs                                    |
+| `substitution`       | Union-find variable binding (path-splitting)               |
+| `unify()`            | Robinson MGU → `std::expected<subst_delta, unify_error>`   |
+| `type_inferrer`      | Algorithm W over Flux AST                                  |
+| Builtin schemes      | Polymorphic types for `sqrt`, `map`, `filter`, `reduce`, … |
+| `composite_solver`   | Route constraints to specialized solvers                   |
+| `type_error`         | Structured error with type names for diagnostics           |
 
 ---
 
 ## Next
 
-[Chapter 5b → Vakya Type System Deep Dive](ch05b_vakya_types.md) — the V3 constraint reasoning
-stack: `analysis_store`, effects, capabilities, guarded rewrites, SMT verification, and query engine.
+[Chapter 5b → Vakya Type System Deep Dive](ch05b_vakya_types.md) — the V3 constraint reasoning stack: `analysis_store`,
+effects, capabilities, guarded rewrites, SMT verification, and query engine.
 
 [Chapter 6 → Shape Inference](ch06_shape_inference.md) — deduce tensor dimensions.

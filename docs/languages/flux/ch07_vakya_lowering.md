@@ -2,8 +2,8 @@
 
 ## Theory
 
-**Vakya lowering** translates the typed Flux AST into a `vakya::node` expression tree. This is the
-bridge between the language frontend and the Lithe compiler pipeline.
+**Vakya lowering** translates the typed Flux AST into a `vakya::node` expression tree. This is the bridge between the
+language frontend and the Lithe compiler pipeline.
 
 ### Why Not Build Vakya Directly in the Parser?
 
@@ -11,10 +11,9 @@ Separating parsing from Vakya construction enables:
 
 1. **Independent testing** — parse a file, check the AST without running any optimizer
 2. **Multiple frontends** — both the Flux parser and the C++ EDSL produce the same Vakya tree
-3. **Semantic passes first** — name resolution and type inference annotate the AST before
-   any Vakya node is created
-4. **AST-level optimizations** — some rewrites (e.g., constant folding of literal arithmetic) are
-   easier on the AST than on the Vakya DAG
+3. **Semantic passes first** — name resolution and type inference annotate the AST before any Vakya node is created
+4. **AST-level optimizations** — some rewrites (e.g., constant folding of literal arithmetic) are easier on the AST than
+   on the Vakya DAG
 
 ### What Is a Vakya Node?
 
@@ -28,6 +27,7 @@ auto e = vakya::as_expr(x) + vakya::as_expr(y) * 2;
 ```
 
 Tags carry metadata via `vakya::emit::tag_descriptor<Tag>`:
+
 - `symbol` — printable name (`"add"`, `"sqrt"`, …)
 - `stable_id` — deterministic integer ID for caching
 - `arity` — expected child count
@@ -211,8 +211,7 @@ vakya_expr vakya_lowerer::lower_lambda(lambda_node const& node) {
 
 ## CSE via dag_builder
 
-`lithe::dag_builder` (backed by `vakya::graph::dag_builder`) automatically deduplicates identical
-subtrees. This means:
+`lithe::dag_builder` (backed by `vakya::graph::dag_builder`) automatically deduplicates identical subtrees. This means:
 
 ```flux
 let x2 = x*x
@@ -220,8 +219,8 @@ let y2 = y*y
 sqrt(x2 + y2)
 ```
 
-If `x*x` appears twice (once in distance, once in some other expression), the `dag_builder` gives both
-the same `shared_expr` node. No redundant computation.
+If `x*x` appears twice (once in distance, once in some other expression), the `dag_builder` gives both the same
+`shared_expr` node. No redundant computation.
 
 ```cpp
 // dag_builder uses structural_hash for deduplication
@@ -234,8 +233,8 @@ assert(a.hash() == b.hash());  // same node
 
 ## Structural Hash Invariant
 
-After lowering, the `structural_hash` of the Vakya tree produced from Flux source must equal the hash
-of the equivalent C++ EDSL expression. This is the core invariant of the Flux system.
+After lowering, the `structural_hash` of the Vakya tree produced from Flux source must equal the hash of the equivalent
+C++ EDSL expression. This is the core invariant of the Flux system.
 
 ```cpp
 // Flux source path:
@@ -299,6 +298,7 @@ int main() {
 ```
 
 Expected output:
+
 ```
 Flux == C++ EDSL: true
 sqrt
@@ -322,5 +322,5 @@ sqrt
 
 ## Next
 
-[Chapter 8 → Rewrites & E-Graphs](ch08_rewrites.md) — apply algebraic rewrites and equality
-saturation to the Vakya tree.
+[Chapter 8 → Rewrites & E-Graphs](ch08_rewrites.md) — apply algebraic rewrites and equality saturation to the Vakya
+tree.

@@ -2,9 +2,11 @@
 
 ## Overview
 
-Flux leverages **Lithe's native GPU backends** to dispatch tensor operations to Metal (macOS) or Vulkan (cross-platform).
+Flux leverages **Lithe's native GPU backends** to dispatch tensor operations to Metal (macOS) or Vulkan
+(cross-platform).
 
 The pipeline:
+
 ```
 Flux AST
   ↓
@@ -59,7 +61,8 @@ struct gpu_execution_graph {
 };
 ```
 
-Each node is a **rank-1 contiguous tensor operation** (for now; sparse and irregular patterns require explicit ABI later).
+Each node is a **rank-1 contiguous tensor operation** (for now; sparse and irregular patterns require explicit ABI
+later).
 
 ---
 
@@ -68,10 +71,12 @@ Each node is a **rank-1 contiguous tensor operation** (for now; sparse and irreg
 ## See It in Action
 
 Architecture example demonstrates the full GPU pipeline:
-[`src/examples/languages/flux/flux_compiler_architecture.hpp`](../../../src/examples/languages/flux/flux_compiler_architecture.hpp)
+[
+`src/examples/languages/flux/flux_compiler_architecture.hpp`](../../../src/examples/languages/flux/flux_compiler_architecture.hpp)
 (Search for `compilation_pipeline::compile()`)
 
 The example shows:
+
 - Name resolution → type inference → shape inference
 - Vakya lowering → Lithe HL-MIR transformation
 - Cost model estimates Metal GPU vs CPU SIMD
@@ -165,6 +170,7 @@ if (admitter.admit(gpu_graph)) {
 ```
 
 **Rejection reasons:**
+
 - Graph memory exceeds `max_device_memory`
 - Intermediate tensors don't fit in device cache
 - Backend unavailable (e.g., Metal on non-macOS)
@@ -285,7 +291,8 @@ This emits GPU-side printfs (Metal) or buffer readback (Vulkan).
 1. **Rank constraint**: HL-MIR elementwise supports only rank-1 contiguous tensors (no multi-dim stencils yet)
 2. **Scalar ops**: No GPU dispatch for truly scalar work
 3. **Control flow**: GPU kernels cannot branch on data-dependent conditions
-4. **Intra-kernel communication**: No explicit workgroup sync (Metal can use threadgroup memory, but Flux doesn't expose it yet)
+4. **Intra-kernel communication**: No explicit workgroup sync (Metal can use threadgroup memory, but Flux doesn't expose
+   it yet)
 
 ---
 

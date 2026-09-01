@@ -30,7 +30,8 @@
 
 ## 1. Overview
 
-Anvaya is a header-only, zero-virtual, C++23 relational compiler framework for authoring typed, optimizable relational queries over C++ POJOs. It provides:
+Anvaya is a header-only, zero-virtual, C++23 relational compiler framework for authoring typed, optimizable relational
+queries over C++ POJOs. It provides:
 
 - Compile-time schema derivation from any `meta::Reflectable` type
 - 3VL-correct null semantics (Kleene K₃)
@@ -39,6 +40,7 @@ Anvaya is a header-only, zero-virtual, C++23 relational compiler framework for a
 - Five-tier explain output for diagnostics and optimization observability
 
 **Design axioms:**
+
 - Users pay only for what they use (zero-overhead abstractions, opt-in layers)
 - No virtual functions, no macros in the semantic core
 - Single Vākya waist: every surface lowers to `vakya::node<Tag, …>`
@@ -75,22 +77,23 @@ User surface
 
 Anvaya's plan language is a closed operator set **𝒜** (bag/multiset semantics unless `distinct`):
 
-| Operator | Signature | Determinism |
-|----------|-----------|-------------|
-| `Scan(R)` | `→ Rel(R)` | deterministic |
-| `Filter(r, p)` | `Rel(S) × Pred(S) → Rel(S)` | deterministic |
-| `Project(r, c…)` | `Rel(S) × cols → Rel(c)` | deterministic |
-| `Join(a, b, p)` | `Rel(S) × Rel(T) × Pred(S⊎T) → Rel(S⊎T)` | barrier |
-| `Aggregate(r, k, a)` | `Rel(S) × keys × aggs → Rel(k ⊎ derived(a))` | barrier |
-| `Window(r, spec)` | `Rel(S) × spec → Rel(S ⊎ derived)` | barrier |
-| `Order(r, keys)` | `Rel(S) × sort-keys → SeqRel(S)` | sequence-defining |
-| `Limit(r, n)` | `Rel(S) × ℕ → Rel(S)` | deterministic |
-| `Distinct(r)` | `Rel(S) → Rel(S)` | deterministic |
-| `Union(a, b)` | `Rel(S) × Rel(S) → Rel(S)` | barrier |
-| `Intersect(a, b)` | `Rel(S) × Rel(S) → Rel(S)` | barrier |
-| `Except(a, b)` | `Rel(S) × Rel(S) → Rel(S)` | barrier |
+| Operator             | Signature                                    | Determinism       |
+|----------------------|----------------------------------------------|-------------------|
+| `Scan(R)`            | `→ Rel(R)`                                   | deterministic     |
+| `Filter(r, p)`       | `Rel(S) × Pred(S) → Rel(S)`                  | deterministic     |
+| `Project(r, c…)`     | `Rel(S) × cols → Rel(c)`                     | deterministic     |
+| `Join(a, b, p)`      | `Rel(S) × Rel(T) × Pred(S⊎T) → Rel(S⊎T)`     | barrier           |
+| `Aggregate(r, k, a)` | `Rel(S) × keys × aggs → Rel(k ⊎ derived(a))` | barrier           |
+| `Window(r, spec)`    | `Rel(S) × spec → Rel(S ⊎ derived)`           | barrier           |
+| `Order(r, keys)`     | `Rel(S) × sort-keys → SeqRel(S)`             | sequence-defining |
+| `Limit(r, n)`        | `Rel(S) × ℕ → Rel(S)`                        | deterministic     |
+| `Distinct(r)`        | `Rel(S) → Rel(S)`                            | deterministic     |
+| `Union(a, b)`        | `Rel(S) × Rel(S) → Rel(S)`                   | barrier           |
+| `Intersect(a, b)`    | `Rel(S) × Rel(S) → Rel(S)`                   | barrier           |
+| `Except(a, b)`       | `Rel(S) × Rel(S) → Rel(S)`                   | barrier           |
 
-**Closure claim:** every ergonomic surface (`between`, `fragment`, SQL literal, pipe) lowers into **𝒜** and nothing else. If a feature cannot be expressed in **𝒜**, it does not enter v1.
+**Closure claim:** every ergonomic surface (`between`, `fragment`, SQL literal, pipe) lowers into **𝒜** and nothing
+else. If a feature cannot be expressed in **𝒜**, it does not enter v1.
 
 ### Tag ID Band (append-only after v1.0)
 
@@ -122,6 +125,7 @@ A `consteval` uniqueness + range guard in `tags.hpp` enforces this statically.
                 |
               Int32
 ```
+
 `Bool`, `String`, `Date`, `Timestamp` are incomparable islands.
 
 **Promotion rule:** `promote(a, b) = a ⊔ b`. Incomparable → `Top` sentinel → `type_error` diagnostic.
@@ -129,24 +133,27 @@ A `consteval` uniqueness + range guard in `tags.hpp` enforces this statically.
 ### Nullable as Idempotent Modifier
 
 `Nullable<T>` is a 1-argument constructor, not `std::optional` identity:
+
 - `Nullable(Nullable(T)) = Nullable(T)` (idempotent, enforced by arena collapse)
 - `Nullable(T) cmp Nullable(T) → tri_bool` via 3VL (§5)
 
 ### C++ Type Mapping (`cpp_to_rel_kind<T>`)
 
-| C++ type | `rel_scalar_kind` |
-|----------|-------------------|
-| `bool` | `Bool` |
-| `int`, `int32_t` | `Int32` |
-| `int64_t` | `Int64` |
-| `float`, `double` | `Float64` |
-| `std::string` | `String` |
-| `std::optional<T>` | `Nullable` |
+| C++ type           | `rel_scalar_kind` |
+|--------------------|-------------------|
+| `bool`             | `Bool`            |
+| `int`, `int32_t`   | `Int32`           |
+| `int64_t`          | `Int64`           |
+| `float`, `double`  | `Float64`         |
+| `std::string`      | `String`          |
+| `std::optional<T>` | `Nullable`        |
 
 ### Layering
 
-- **`vakya::types`** (reused verbatim): `type_arena`, `type_ref`, `intern_primitive`, `intern_constructor`, `type_rewrite`
-- **`anvaya::types`** (Anvaya-local, relational policy): `make_relational_type_registry()`, `promote()`, `cpp_to_rel_kind<T>`, `column_rel_kind<R,I>`
+- **`vakya::types`** (reused verbatim): `type_arena`, `type_ref`, `intern_primitive`, `intern_constructor`,
+  `type_rewrite`
+- **`anvaya::types`** (Anvaya-local, relational policy): `make_relational_type_registry()`, `promote()`,
+  `cpp_to_rel_kind<T>`, `column_rel_kind<R,I>`
 
 ---
 
@@ -168,7 +175,8 @@ Anvaya uses Kleene K₃ throughout.
 
 ### NULL Ordering (for ORDER BY)
 
-Default: **NULLs last** for ASC, **NULLs first** for DESC (SQL standard). Overridable per sort-key via `null_ordering::nulls_first` / `nulls_last`.
+Default: **NULLs last** for ASC, **NULLs first** for DESC (SQL standard). Overridable per sort-key via
+`null_ordering::nulls_first` / `nulls_last`.
 
 ---
 
@@ -268,7 +276,8 @@ auto p = query<Order>() | offset(5);
 
 **Sort helpers**: `asc(col)` / `desc(col)` return `sort_key<ColExpr>` with the correct direction.
 
-The `anvaya::edsl` namespace re-exports all core symbols (`query`, `field`, `col`, `sort_key`, `agg_*`, `window_spec`, `between`, etc.) — `using namespace anvaya::edsl` is sufficient.
+The `anvaya::edsl` namespace re-exports all core symbols (`query`, `field`, `col`, `sort_key`, `agg_*`, `window_spec`,
+`between`, etc.) — `using namespace anvaya::edsl` is sufficient.
 
 ---
 
@@ -276,11 +285,11 @@ The `anvaya::edsl` namespace re-exports all core symbols (`query`, `field`, `col
 
 Three tiers:
 
-| Tier | Function | Definition |
-|------|----------|------------|
-| Surface | `same_surface_shape(a, b)` | Raw structural equality (bytewise AST) |
+| Tier      | Function                     | Definition                                          |
+|-----------|------------------------------|-----------------------------------------------------|
+| Surface   | `same_surface_shape(a, b)`   | Raw structural equality (bytewise AST)              |
 | Canonical | `same_canonical_shape(a, b)` | Equality after `predicate_merge` + `distinct_dedup` |
-| Semantic | `same_semantics(a, b)` | Equality under commutativity (conformance/tooling) |
+| Semantic  | `same_semantics(a, b)`       | Equality under commutativity (conformance/tooling)  |
 
 `same_shape(a, b)` is a deprecated alias of `same_surface_shape` (one-release compat).
 
@@ -308,18 +317,32 @@ concept relational_backend = requires(B& b, const compiled_plan& cp) {
 //   estimate(plan)         → cost_vector
 ```
 
-**Capability bitset** (`backend_capabilities`): a backend lacking `aggregate` never receives an aggregate plan — the planner rejects it before execution via `negotiate_backends`.
+**Capability bitset** (`backend_capabilities`): a backend lacking `aggregate` never receives an aggregate plan — the
+planner rejects it before execution via `negotiate_backends`.
 
 ### In-Memory Compile Footprint Controls
 
-The in-memory backend keeps compile-time memory bounded by **erasing plan type early** (sutra-style), so the heavy operator helpers instantiate once per `Row` instead of once per plan-subtree shape:
+The in-memory backend keeps compile-time memory bounded by **erasing plan type early** (sutra-style), so the heavy
+operator helpers instantiate once per `Row` instead of once per plan-subtree shape:
 
-- `execute<Row>(plan, rows)` lowers the typed plan tree ONCE into a flat, Row-only `rel_program<Row>` (a linear `vector<rel_op<Row>>`; binary nodes — join/set-op — carry nested sub-programs run via runtime recursion, not compile-time recursion).
-- Row-typed behaviour is erased into `std::function` closures built once at lowering: `build_pred<Row,Pred>` composes a predicate subtree into one `tri_bool(const Row&)`; `build_less<Row>` wraps `sort_key_list_cmp` into one `bool(const Row&,const Row&)`; aggregate/window/user thunks capture their spec into an `xform` closure. Pure runtime data (limit `n`, set-op kind, user `stable_id`) needs no closure.
-- A single non-recursive interpreter `run<Row>()` walks the flat op-list (`switch` on opcode), calling the shared `_impl` helpers (`exec_filter_impl`, `exec_order_impl`, `exec_window_impl`, `exec_aggregate_impl`, `exec_set_op_impl`, `exec_join_impl`, `exec_limit_impl`, `exec_offset_impl`, `exec_distinct_impl`) — each now one Row instantiation.
-- `eval_plan` / `eval_plan_with_engine` remain as thin wrappers that route through `lower<Row> + run<Row>` (engine ref threads user-op registry for the §ext path). `backend/rel_program.hpp` is a stable include point; the IR and `lower`/`run` live in `in_memory.hpp`.
+- `execute<Row>(plan, rows)` lowers the typed plan tree ONCE into a flat, Row-only `rel_program<Row>` (a linear
+  `vector<rel_op<Row>>`; binary nodes — join/set-op — carry nested sub-programs run via runtime recursion, not
+  compile-time recursion).
+- Row-typed behaviour is erased into `std::function` closures built once at lowering: `build_pred<Row,Pred>` composes a
+  predicate subtree into one `tri_bool(const Row&)`; `build_less<Row>` wraps `sort_key_list_cmp` into one
+  `bool(const Row&,const Row&)`; aggregate/window/user thunks capture their spec into an `xform` closure. Pure runtime
+  data (limit `n`, set-op kind, user `stable_id`) needs no closure.
+- A single non-recursive interpreter `run<Row>()` walks the flat op-list (`switch` on opcode), calling the shared
+  `_impl` helpers (`exec_filter_impl`, `exec_order_impl`, `exec_window_impl`, `exec_aggregate_impl`, `exec_set_op_impl`,
+  `exec_join_impl`, `exec_limit_impl`, `exec_offset_impl`, `exec_distinct_impl`) — each now one Row instantiation.
+- `eval_plan` / `eval_plan_with_engine` remain as thin wrappers that route through `lower<Row> + run<Row>` (engine ref
+  threads user-op registry for the §ext path). `backend/rel_program.hpp` is a stable include point; the IR and `lower`/
+  `run` live in `in_memory.hpp`.
 
-This is the fix for the ~30GB template-instantiation blowup (three type-recursive walks per unique plan shape → one O(n) lowering walk with tiny per-node bodies), and preserves runtime semantics. The full typed optimizer pipeline stays available opt-in via `exec_options` (`optimize`/`optimize_level`); the default in-memory path is lightweight (primary use = ORM layer over a SQL DB that does the real optimization).
+This is the fix for the ~30GB template-instantiation blowup (three type-recursive walks per unique plan shape → one O
+(n) lowering walk with tiny per-node bodies), and preserves runtime semantics. The full typed optimizer pipeline stays
+available opt-in via `exec_options` (`optimize`/`optimize_level`); the default in-memory path is lightweight (primary
+use = ORM layer over a SQL DB that does the real optimization).
 
 ### Cost Vector
 
@@ -332,7 +355,8 @@ struct cost_vector {
 };
 ```
 
-> **Note:** Row cardinality is tracked separately via `cardinality_estimate` (`opt/cost.hpp`), not `cost_vector`. Cost models may optionally implement `CostModelWithCardinality` to provide cardinality estimates alongside the cost vector.
+> **Note:** Row cardinality is tracked separately via `cardinality_estimate` (`opt/cost.hpp`), not `cost_vector`. Cost
+> models may optionally implement `CostModelWithCardinality` to provide cardinality estimates alongside the cost vector.
 
 ---
 
@@ -357,7 +381,8 @@ std::string s = anvaya::explain_full(plan, store, &phys_tier);
 
 ## 10. Operator Identity Invariant
 
-**Invariant (G10):** every relational operator's `op_id` annotation (`"anvaya.rel.join"`, etc.) must survive from lowering to physical-operator selection. No optimizer pass may drop an `op_id` without replacing it.
+**Invariant (G10):** every relational operator's `op_id` annotation (`"anvaya.rel.join"`, etc.) must survive from
+lowering to physical-operator selection. No optimizer pass may drop an `op_id` without replacing it.
 
 ```cpp
 // Conformance verifier:
@@ -393,9 +418,12 @@ static_assert(promote(rel_scalar_kind::Int32, rel_scalar_kind::Int64)
 
 ## 12. Optimization Framework
 
-Anvaya is an abstract framework — SQL backends (SQLite, Postgres, DuckDB) do their own optimization. Anvaya's optimizer rewrites the AQL AST before handing off to the backend (predicate merging, distinct deduplication, projection pruning). No physical planner is needed or included by default.
+Anvaya is an abstract framework — SQL backends (SQLite, Postgres, DuckDB) do their own optimization. Anvaya's optimizer
+rewrites the AQL AST before handing off to the backend (predicate merging, distinct deduplication, projection pruning).
+No physical planner is needed or included by default.
 
-**For DB builders** (implementing their own execution engine): include `anvaya/ext/planner/planner.hpp` for the physical planning extension.
+**For DB builders** (implementing their own execution engine): include `anvaya/ext/planner/planner.hpp` for the physical
+planning extension.
 
 ### Default Pipeline (ORM / query-builder path)
 
@@ -409,15 +437,16 @@ Logical plan
 
 ### Concepts (`opt/concepts.hpp`)
 
-| Concept | Models |
-|---------|--------|
-| `OptimizationRule<T,Node>` | `predicate_merge`, `distinct_dedup` |
-| `OptimizationPass<T,Plan>` | any pass with `.run(plan)` |
-| `CostModel<T,Node>` | `relational_model`, `nested_model`, `graph_model` |
-| `CostModelWithCardinality<T,Node>` | `relational_model` (generic fallback) |
-| `StatisticsProvider<T>` | `basic_statistics_provider` |
+| Concept                            | Models                                            |
+|------------------------------------|---------------------------------------------------|
+| `OptimizationRule<T,Node>`         | `predicate_merge`, `distinct_dedup`               |
+| `OptimizationPass<T,Plan>`         | any pass with `.run(plan)`                        |
+| `CostModel<T,Node>`                | `relational_model`, `nested_model`, `graph_model` |
+| `CostModelWithCardinality<T,Node>` | `relational_model` (generic fallback)             |
+| `StatisticsProvider<T>`            | `basic_statistics_provider`                       |
 
-Physical planner concepts (`PhysicalPlanner`, `JoinSearchStrategy`, `OptimizationBundle`) are in `anvaya/ext/planner/concepts.hpp`.
+Physical planner concepts (`PhysicalPlanner`, `JoinSearchStrategy`, `OptimizationBundle`) are in
+`anvaya/ext/planner/concepts.hpp`.
 
 ### Cost Vector (`backend/registry.hpp`)
 
@@ -494,7 +523,8 @@ The execution pipeline applies optimization in this order:
 3. configured pass tuple from optimizer context
 4. backend execution
 
-Track 1/2 AQL wrappers (`aql<Row>(text)` and `aql<"...", Row>()`) forward `exec_options` into the same typed canonicalization stage before plan erasure.
+Track 1/2 AQL wrappers (`aql<Row>(text)` and `aql<"...", Row>()`) forward `exec_options` into the same typed
+canonicalization stage before plan erasure.
 
 ### Named Pipeline (`opt/context.hpp`)
 
@@ -516,16 +546,16 @@ Default for `query<R>().execute(…)` is `relational.o2`.
 
 Concrete named algorithms in the implementation, with the header they live in.
 
-| Concern | Algorithm | Where |
-|---|---|---|
-| Null semantics | Kleene three-valued logic K3 (`tri_bool` {false_, true_, unknown}); AND/OR/NOT truth tables with null propagation | `null3vl.hpp` |
-| Relational core | Relational-algebra operator set: project, select, join, aggregate, order, limit, distinct, union, difference | `ast.hpp`, `query.hpp` |
-| Canonicalization / CSE | Structural-hash equivalence + operator-identity canonicalization (dedup of identical subplans) | §7, `identity.hpp` |
-| Logical optimization | Rule-based rewrite passes: `predicate_merge`, `distinct_dedup`, projection pruning (`OptimizationRule`/`OptimizationPass`) | `opt/rules.hpp`, `opt/concepts.hpp` |
-| Cost modeling | Multi-objective `cost_vector` (latency/memory/throughput/power/io/network) with weighted-sum `total()`; `relational`/`nested`/`graph` cost models | `backend/registry.hpp` |
-| Physical planning (opt-in) | MILP-based physical join/plan selection via Siddhanta; join-search strategy concept | `opt/physical_milp.hpp`, `ext/planner/` |
-| Explain | Five-tier explain node (logical / typed / optimized+cost / physical / backend) | `explain.hpp` |
-| Type system | Join-semilattice column/row types; nullability lattice | `types/types.hpp` |
+| Concern                    | Algorithm                                                                                                                                         | Where                                   |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------|
+| Null semantics             | Kleene three-valued logic K3 (`tri_bool` {false_, true_, unknown}); AND/OR/NOT truth tables with null propagation                                 | `null3vl.hpp`                           |
+| Relational core            | Relational-algebra operator set: project, select, join, aggregate, order, limit, distinct, union, difference                                      | `ast.hpp`, `query.hpp`                  |
+| Canonicalization / CSE     | Structural-hash equivalence + operator-identity canonicalization (dedup of identical subplans)                                                    | §7, `identity.hpp`                      |
+| Logical optimization       | Rule-based rewrite passes: `predicate_merge`, `distinct_dedup`, projection pruning (`OptimizationRule`/`OptimizationPass`)                        | `opt/rules.hpp`, `opt/concepts.hpp`     |
+| Cost modeling              | Multi-objective `cost_vector` (latency/memory/throughput/power/io/network) with weighted-sum `total()`; `relational`/`nested`/`graph` cost models | `backend/registry.hpp`                  |
+| Physical planning (opt-in) | MILP-based physical join/plan selection via Siddhanta; join-search strategy concept                                                               | `opt/physical_milp.hpp`, `ext/planner/` |
+| Explain                    | Five-tier explain node (logical / typed / optimized+cost / physical / backend)                                                                    | `explain.hpp`                           |
+| Type system                | Join-semilattice column/row types; nullability lattice                                                                                            | `types/types.hpp`                       |
 
 ---
 
@@ -540,17 +570,17 @@ For backends that implement their own execution engine (not SQL pass-through):
 
 ### Planners (`ext/planner/planner.hpp`)
 
-| Planner | Default? | Mechanism |
-|---------|----------|-----------|
-| `heuristic_planner` | ✅ | Zero cost vector; fast; `strategy_note="heuristic:hash_join"` |
-| `cascades_planner` | v2 target | Memo seam reserved; delegates to heuristic at v1 |
+| Planner             | Default?  | Mechanism                                                     |
+|---------------------|-----------|---------------------------------------------------------------|
+| `heuristic_planner` | ✅        | Zero cost vector; fast; `strategy_note="heuristic:hash_join"` |
+| `cascades_planner`  | v2 target | Memo seam reserved; delegates to heuristic at v1              |
 
 ### Search Strategies
 
-| Strategy | Notes |
-|----------|-------|
-| `greedy_search` | Default; sorts tables by cardinality; O(n log n) |
-| `milp_search` | **Dormant**: struct compiles and satisfies `JoinSearchStrategy`; delegates to greedy hook. Full MILP activation requires including `physical_milp.hpp` — not active: Siddhanta `MILPSolver::solve` compile time is prohibitive (minutes per TU) until the backend stabilises. |
+| Strategy        | Notes                                                                                                                                                                                                                                                                         |
+|-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `greedy_search` | Default; sorts tables by cardinality; O(n log n)                                                                                                                                                                                                                              |
+| `milp_search`   | **Dormant**: struct compiles and satisfies `JoinSearchStrategy`; delegates to greedy hook. Full MILP activation requires including `physical_milp.hpp` — not active: Siddhanta `MILPSolver::solve` compile time is prohibitive (minutes per TU) until the backend stabilises. |
 
 ### Optimization Bundles (`ext/planner/context_ext.hpp`)
 
@@ -611,43 +641,46 @@ auto q = anvaya::aql<"select * from order where status = 'paid'", Order>();
 auto res = q.exec(rows);
 ```
 
-**Error diagnostics:** On failure, `d.ok == false`, `d.error_view()` returns the message, and `d.error_pos` holds the byte offset of the failure — rich `static_assert` text shows both.
+**Error diagnostics:** On failure, `d.ok == false`, `d.error_view()` returns the message, and `d.error_pos` holds the
+byte offset of the failure — rich `static_assert` text shows both.
 
-**Libraries used:**  
-- `akshara::fixed_string` — NTTP query carrier  
-- `lang::samasa::parse_static` — compile-time lexing  
+**Libraries used:**
+
+- `akshara::fixed_string` — NTTP query carrier
+- `lang::samasa::parse_static` — compile-time lexing
 - `meta::Reflectable` — Row schema derivation (shared build stages)
 
 ### Track 3 — eDSL
 
-See §6 Fluent API and Track 3 eDSL subsection. `anvaya/frontend/aql_edsl.hpp` provides the `anvaya::edsl` namespace with `col<>`, sort/agg/null helpers, `group_by/agg` pipe combinators, and `over()` window builder.
+See §6 Fluent API and Track 3 eDSL subsection. `anvaya/frontend/aql_edsl.hpp` provides the `anvaya::edsl` namespace with
+`col<>`, sort/agg/null helpers, `group_by/agg` pipe combinators, and `over()` window builder.
 
 ---
 
 ## 14. Library Utilization
 
-| Concern | Library / Component |
-|---------|---------------------|
-| Expression AST | `vakya::node`, `structural_hash`, `tag_descriptor` |
-| Pattern rewrites | `vakya::pattern` (`opt/rules.hpp`) |
-| Type interning | `vakya::types::type_arena` / `intern_primitive` |
-| Reflection / schema | `meta::reflect_t`, `schema_hash` |
-| 3VL | `anvaya::null3vl` (Kleene K₃) |
-| Validation / domain | `sutra::domain` + `sema/*` |
-| Plan cache | `containers/cache/kosha` (via `artifact_key`) |
-| Parallel execution | `pravaha::InlineBackend` |
-| Compile-time lex | `lang::samasa::parse_static` (AQL Track 2) |
-| NTTP string | `akshara::fixed_string` (AQL Track 2) |
-| Profiles / passes | `lithe::profile`, `lithe::passes::pass_bundle` |
-| Join-order MILP | `siddhanta` (`ext/planner/physical_milp.hpp`, **dormant** — high compile cost; greedy active) |
-| Optimizer seams (ORM) | `opt/{concepts,cost,statistics,context}.hpp` |
-| Cardinality estimation | `opt/cost.hpp` (`cardinality_estimate`, `CostModelWithCardinality`) |
-| Physical planner (DB builder) | `ext/planner/planner.hpp` (`PhysicalPlanner`, `heuristic_planner`, `cascades_planner`) |
-| Join search strategies | `ext/planner/planner.hpp` (`JoinSearchStrategy`, `greedy_search`, `milp_search`) |
-| Optimization bundles | `ext/planner/context_ext.hpp` (`OptimizationBundle`, `*_optimizer_bundle`) |
-| Window functions | `window_spec.hpp`, `in_memory.hpp` (`exec_window_impl`) |
-| eDSL / Track 3 | `frontend/aql_edsl.hpp` (`anvaya::edsl`, `col<>`, `asc/desc/sum/count/is_null`, `over()`) |
-| SQLite backend | `backend/sqlite.hpp` (`sqlite_backend`, opt-in via `HAS_SQLITE3`) |
+| Concern                       | Library / Component                                                                           |
+|-------------------------------|-----------------------------------------------------------------------------------------------|
+| Expression AST                | `vakya::node`, `structural_hash`, `tag_descriptor`                                            |
+| Pattern rewrites              | `vakya::pattern` (`opt/rules.hpp`)                                                            |
+| Type interning                | `vakya::types::type_arena` / `intern_primitive`                                               |
+| Reflection / schema           | `meta::reflect_t`, `schema_hash`                                                              |
+| 3VL                           | `anvaya::null3vl` (Kleene K₃)                                                                 |
+| Validation / domain           | `sutra::domain` + `sema/*`                                                                    |
+| Plan cache                    | `containers/cache/kosha` (via `artifact_key`)                                                 |
+| Parallel execution            | `pravaha::InlineBackend`                                                                      |
+| Compile-time lex              | `lang::samasa::parse_static` (AQL Track 2)                                                    |
+| NTTP string                   | `akshara::fixed_string` (AQL Track 2)                                                         |
+| Profiles / passes             | `lithe::profile`, `lithe::passes::pass_bundle`                                                |
+| Join-order MILP               | `siddhanta` (`ext/planner/physical_milp.hpp`, **dormant** — high compile cost; greedy active) |
+| Optimizer seams (ORM)         | `opt/{concepts,cost,statistics,context}.hpp`                                                  |
+| Cardinality estimation        | `opt/cost.hpp` (`cardinality_estimate`, `CostModelWithCardinality`)                           |
+| Physical planner (DB builder) | `ext/planner/planner.hpp` (`PhysicalPlanner`, `heuristic_planner`, `cascades_planner`)        |
+| Join search strategies        | `ext/planner/planner.hpp` (`JoinSearchStrategy`, `greedy_search`, `milp_search`)              |
+| Optimization bundles          | `ext/planner/context_ext.hpp` (`OptimizationBundle`, `*_optimizer_bundle`)                    |
+| Window functions              | `window_spec.hpp`, `in_memory.hpp` (`exec_window_impl`)                                       |
+| eDSL / Track 3                | `frontend/aql_edsl.hpp` (`anvaya::edsl`, `col<>`, `asc/desc/sum/count/is_null`, `over()`)     |
+| SQLite backend                | `backend/sqlite.hpp` (`sqlite_backend`, opt-in via `HAS_SQLITE3`)                             |
 
 ---
 
@@ -664,14 +697,14 @@ See §6 Fluent API and Track 3 eDSL subsection. `anvaya/frontend/aql_edsl.hpp` p
 
 ## 16. Naming Conventions
 
-| Layer | Name |
-|-------|------|
-| Public API | Anvaya Core / Explain / Native Backend / SQL Backend |
-| AST / Hashing | Vākya (`vakya::`) |
-| Validation / Domain | Sutra (`sutra::`) |
-| Cost model / Profiles | Lithe (`lithe_cost_model::`) |
-| Parallel execution | Pravaha (`pravaha::`) |
-| SMT proofs (opt-in) | Tarka (`tarka::`) |
-| Reflection | Meta (`meta::`) |
+| Layer                 | Name                                                 |
+|-----------------------|------------------------------------------------------|
+| Public API            | Anvaya Core / Explain / Native Backend / SQL Backend |
+| AST / Hashing         | Vākya (`vakya::`)                                    |
+| Validation / Domain   | Sutra (`sutra::`)                                    |
+| Cost model / Profiles | Lithe (`lithe_cost_model::`)                         |
+| Parallel execution    | Pravaha (`pravaha::`)                                |
+| SMT proofs (opt-in)   | Tarka (`tarka::`)                                    |
+| Reflection            | Meta (`meta::`)                                      |
 
 **C++23/C++26** — not C23/C26. Core is header-only; backends may be compiled (opt-in).

@@ -1,8 +1,8 @@
 # Generic Language Layer — Framework Reference
 
-`pebble/include/languages/generic/` provides a language-neutral foundation for building embeddable domain-specific languages (
-DSLs) and compiler frontends. Designed for C++23, header-only, zero virtual functions, zero macros. All abstractions are
-pluggable; no forced coupling.
+`pebble/include/languages/generic/` provides a language-neutral foundation for building embeddable domain-specific
+languages (DSLs) and compiler frontends. Designed for C++23, header-only, zero virtual functions, zero macros. All
+abstractions are pluggable; no forced coupling.
 
 **Namespace:** `lang::`  
 **Zero dependencies:** Core layer uses only `<cstdint>`, `<string_view>`. Host/semantic layers depend on related
@@ -248,13 +248,14 @@ Shared CST + event log layer for all language frontends. Zero samasa dependency 
 
 ### `spans.hpp` — Span Primitives
 
-**Consumers:** samasa's `byte_span`, `text_edit`, and `token_range` are aliases of these generic primitives (single owner, no duplication). All three resolve to `lang::byte_span`, `lang::text_edit`, and `lang::token_range` respectively.
+**Consumers:** samasa's `byte_span`, `text_edit`, and `token_range` are aliases of these generic primitives (single
+owner, no duplication). All three resolve to `lang::byte_span`, `lang::text_edit`, and `lang::token_range` respectively.
 
-| Type | Description |
-|------|-------------|
-| `byte_span` | `{offset, length}` in source bytes. `hull(a,b)` = minimal covering span (empty-operand identity). |
-| `token_range` | Half-open `[start, end)` index range into any token array. |
-| `text_edit` | Source mutation: replace `[offset, offset+removed_length)` with `inserted_text`. |
+| Type          | Description                                                                                       |
+|---------------|---------------------------------------------------------------------------------------------------|
+| `byte_span`   | `{offset, length}` in source bytes. `hull(a,b)` = minimal covering span (empty-operand identity). |
+| `token_range` | Half-open `[start, end)` index range into any token array.                                        |
+| `text_edit`   | Source mutation: replace `[offset, offset+removed_length)` with `inserted_text`.                  |
 
 ```cpp
 lang::byte_span a{0, 5}, b{3, 7};
@@ -273,10 +274,14 @@ log.token(0);
 log.end(m, {0, 10});
 ```
 
-**Rollback semantics:** `rollback(m)` truncates if no tokens were committed after `m`; tombstones the `begin_node` otherwise (samasa `event_stream` parity).
+**Rollback semantics:** `rollback(m)` truncates if no tokens were committed after `m`; tombstones the `begin_node`
+otherwise (samasa `event_stream` parity).
 
 **`insert_begin_at(marker, kind)` — retroactive node-open for operator/Pratt trees:**
-Inserts a `begin_node(kind)` event at the position recorded in `marker`, shifting all subsequent events right by one slot. Returns a marker pointing to the newly inserted event. Use when parsing an infix or postfix operator after its left operand has already been emitted — snapshot before the operand, then call `insert_begin_at` once the operator is recognized.
+Inserts a `begin_node(kind)` event at the position recorded in `marker`, shifting all subsequent events right by one
+slot. Returns a marker pointing to the newly inserted event. Use when parsing an infix or postfix operator after its
+left operand has already been emitted — snapshot before the operand, then call `insert_begin_at` once the operator is
+recognized.
 
 ```cpp
 auto pre_left = log.snapshot();
@@ -288,17 +293,16 @@ log.token(2);                                    // right operand
 log.end(m, {0, 3});                              // closes binary_expr with hull span
 ```
 
-O(events-after-insertion) due to the vector shift. Pratt sub-expressions are small so this is
-effectively O(1) in practice. Not suitable for very deep left-recursive rewrites at the top of a
-large event stream.
+O (events-after-insertion) due to the vector shift. Pratt sub-expressions are small so this is effectively O (1) in
+practice. Not suitable for very deep left-recursive rewrites at the top of a large event stream.
 
 **samasa mapping (Stage 3):**
 
-| samasa type | generic type | note |
-|---|---|---|
-| `samasa::event_stream<SK>` | `lang::event_log<SK, samasa_diag_code>` | alias; single owner |
-| `samasa::parse_event<SK>` | `lang::parse_event<SK, samasa_diag_code>` | alias; field `syntax` == `node_kind` (union) |
-| `samasa::event_kind` | `lang::event_kind` | alias |
+| samasa type                | generic type                              | note                                         |
+|----------------------------|-------------------------------------------|----------------------------------------------|
+| `samasa::event_stream<SK>` | `lang::event_log<SK, samasa_diag_code>`   | alias; single owner                          |
+| `samasa::parse_event<SK>`  | `lang::parse_event<SK, samasa_diag_code>` | alias; field `syntax` == `node_kind` (union) |
+| `samasa::event_kind`       | `lang::event_kind`                        | alias                                        |
 
 ### `green_arena.hpp` — Generic Flat CST Arena
 
@@ -311,31 +315,31 @@ auto arena = lang::green_arena<MyKind>::build(
     [&](uint32_t i) { return fnv1a(source, i); });  // leaf_hash_fn
 ```
 
-`splice_subtree` and `recompute_ancestor_hashes` are implemented (Stage 6) as generic partial-reparse
-primitives.
+`splice_subtree` and `recompute_ancestor_hashes` are implemented (Stage 6) as generic partial-reparse primitives.
 
-**`splice_subtree(at, sub)`** — replace the subtree rooted at `at` with the nodes from `sub`.
-Appends `sub`'s nodes (remapping child-id offsets), overwrites node `at` with the remapped sub-root.
-Old subtree slots become holes (reclaimed by a future `reset()`/rebuild — pay-for-use).
+**`splice_subtree(at, sub)`** — replace the subtree rooted at `at` with the nodes from `sub`. Appends `sub`'s nodes
+(remapping child-id offsets), overwrites node `at` with the remapped sub-root. Old subtree slots become holes (reclaimed
+by a future `reset()`/rebuild — pay-for-use).
 
-**`recompute_ancestor_hashes(from)`** — walk from `from` to the root via a transient parent map
-(O(n) build, O(1) lookup, discarded after the call). At each ancestor recomputes `structural_hash`
-using the same FNV recipe as `build()`, so hashes are bit-for-bit identical to a full rebuild.
-The parent map is not stored in nodes (pay-for-use; bloat-free normal use).
+**`recompute_ancestor_hashes(from)`** — walk from `from` to the root via a transient parent map (O (n) build, O (1)
+lookup, discarded after the call). At each ancestor recomputes `structural_hash`
+using the same FNV recipe as `build()`, so hashes are bit-for-bit identical to a full rebuild. The parent map is not
+stored in nodes (pay-for-use; bloat-free normal use).
 
 **samasa mapping (Stage 3):**
 
-| samasa type | generic type | note |
-|---|---|---|
-| `samasa::green_tree<SK>` | `lang::green_arena<SK>` | inherits; same layout |
-| `samasa::green_node<SK>` | `lang::green_node<SK>` | alias |
-| `samasa::green_id` | `lang::arena_id` | alias (`uint32_t`) |
-| `samasa::k_null_green` | `lang::k_null_arena` | alias (`UINT32_MAX`) |
-| samasa CST | `ir_module<SK, std::monostate>` | layout identical; structural hashes byte-for-byte unchanged (FNV recipe) |
+| samasa type              | generic type                    | note                                                                     |
+|--------------------------|---------------------------------|--------------------------------------------------------------------------|
+| `samasa::green_tree<SK>` | `lang::green_arena<SK>`         | inherits; same layout                                                    |
+| `samasa::green_node<SK>` | `lang::green_node<SK>`          | alias                                                                    |
+| `samasa::green_id`       | `lang::arena_id`                | alias (`uint32_t`)                                                       |
+| `samasa::k_null_green`   | `lang::k_null_arena`            | alias (`UINT32_MAX`)                                                     |
+| samasa CST               | `ir_module<SK, std::monostate>` | layout identical; structural hashes byte-for-byte unchanged (FNV recipe) |
 
 ### `static_buffers.hpp` — Constexpr Parse Buffers
 
-`static_event_buffer<KE, DC, MaxEvents>` — same `begin/token/end/rollback/snapshot` API as `event_log`, but backed by `containers::static_vector` for `consteval` use.
+`static_event_buffer<KE, DC, MaxEvents>` — same `begin/token/end/rollback/snapshot` API as `event_log`, but backed by
+`containers::static_vector` for `consteval` use.
 
 ```cpp
 constexpr auto result = [] {
@@ -356,14 +360,14 @@ static_assert(result == 3);
 
 Concrete named algorithms in the framework, with the layer they live in.
 
-| Concern | Algorithm | Where |
-|---|---|---|
-| Parse capture | Append-only `event_log` (begin/token/end event stream); `static_event_buffer` fixed-capacity `constexpr` variant | `tree/event_log.hpp`, `tree/static_buffers.hpp` |
-| Tree materialization | `green_arena::build` folds an event log into an immutable green tree (shared subtree nodes) | `tree/green_arena.hpp` |
-| IR lowering | Event-log → IR module lowering (flat SoA node store + child sidecar) | `ir/lowering.hpp`, `ir/ir_module.hpp` |
-| Module resolution | 9-tier resolver order: native → embedded_artifact → embedded_src → in_memory → project_paths → app_paths → cache → system → package_registry | `module/module_system.hpp` |
-| Semantic scaffolding | Generic scope/symbol resolution + diagnostic accumulation | `semantic/` |
-| Inline storage | SBO buffers via `containers::static_vector` (span/token buffers) | `containers/static_vector.hpp` |
+| Concern              | Algorithm                                                                                                                                    | Where                                           |
+|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------|
+| Parse capture        | Append-only `event_log` (begin/token/end event stream); `static_event_buffer` fixed-capacity `constexpr` variant                             | `tree/event_log.hpp`, `tree/static_buffers.hpp` |
+| Tree materialization | `green_arena::build` folds an event log into an immutable green tree (shared subtree nodes)                                                  | `tree/green_arena.hpp`                          |
+| IR lowering          | Event-log → IR module lowering (flat SoA node store + child sidecar)                                                                         | `ir/lowering.hpp`, `ir/ir_module.hpp`           |
+| Module resolution    | 9-tier resolver order: native → embedded_artifact → embedded_src → in_memory → project_paths → app_paths → cache → system → package_registry | `module/module_system.hpp`                      |
+| Semantic scaffolding | Generic scope/symbol resolution + diagnostic accumulation                                                                                    | `semantic/`                                     |
+| Inline storage       | SBO buffers via `containers::static_vector` (span/token buffers)                                                                             | `containers/static_vector.hpp`                  |
 
 ---
 
@@ -373,14 +377,14 @@ Reusable IR substrate on top of the tree layer. All optimization hooks are opt-i
 
 ### Extension seams (simple → complex ladder)
 
-| Seam | Meaning |
-|------|---------|
-| `KindEnum` | Node kind enum — per-language (e.g. `samasa::syntax_kind`, `crank::ast_kind`) |
-| `ExtPayload = monostate` | Zero extra bytes — CST / untyped AST frontends |
-| `ExtPayload = type_ref` | Typed AST (vakya, crank Stage 8) |
-| `Store = default_store` | `std::vector` heap backing |
-| `Store = handle_store<Tag>` | `slot_map<ir_node, generational_handle<Tag,uint32_t>>` — realized in Stage 9; vakya uses `handle_store<type_tag>` → `type_ref` |
-| `Dedup` policy | `ir_interner` structural hash-consing (opt-in); `kosha_dedup_adapter` satisfies the seam for vakya (reuses `type_intern_cache_t`) |
+| Seam                        | Meaning                                                                                                                           |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `KindEnum`                  | Node kind enum — per-language (e.g. `samasa::syntax_kind`, `crank::ast_kind`)                                                     |
+| `ExtPayload = monostate`    | Zero extra bytes — CST / untyped AST frontends                                                                                    |
+| `ExtPayload = type_ref`     | Typed AST (vakya, crank Stage 8)                                                                                                  |
+| `Store = default_store`     | `std::vector` heap backing                                                                                                        |
+| `Store = handle_store<Tag>` | `slot_map<ir_node, generational_handle<Tag,uint32_t>>` — realized in Stage 9; vakya uses `handle_store<type_tag>` → `type_ref`    |
+| `Dedup` policy              | `ir_interner` structural hash-consing (opt-in); `kosha_dedup_adapter` satisfies the seam for vakya (reuses `type_intern_cache_t`) |
 
 ### `node.hpp` — IR Node
 
@@ -432,11 +436,11 @@ auto mod = lang::lower_events<MyKind>(log, LeafFns{});
 
 **Mapping table (realized in later stages):**
 
-| Frontend | KindEnum | ExtPayload | Store |
-|----------|----------|------------|-------|
-| samasa CST | `syntax_kind` | `monostate` | `default_store` |
-| crank AST (Stage 8) | `crank_kind` | `crank_node_ext` | `default_store` |
-| vakya types (Stage 9) | `type_ir_kind` | `type_ref` | `handle_store<type_tag>` (slot_map/generational_handle/LinearArena, kosha intern) |
+| Frontend              | KindEnum       | ExtPayload       | Store                                                                             |
+|-----------------------|----------------|------------------|-----------------------------------------------------------------------------------|
+| samasa CST            | `syntax_kind`  | `monostate`      | `default_store`                                                                   |
+| crank AST (Stage 8)   | `crank_kind`   | `crank_node_ext` | `default_store`                                                                   |
+| vakya types (Stage 9) | `type_ir_kind` | `type_ref`       | `handle_store<type_tag>` (slot_map/generational_handle/LinearArena, kosha intern) |
 
 ---
 
@@ -729,9 +733,13 @@ tbl.pop_scope();
 
 ### `ast_arena.hpp` — Flat Index-Based AST Storage
 
-**Purpose:** Memory-efficient, grow-safe AST node storage for heterogeneous `std::variant` node types. No pointer invalidation; safe to parallelize allocation.
+**Purpose:** Memory-efficient, grow-safe AST node storage for heterogeneous `std::variant` node types. No pointer
+invalidation; safe to parallelize allocation.
 
-**Relationship to `ir_module`:** `ast_arena<NodeVariant>` stores `std::variant` nodes with children embedded inside each variant alternative. `ir_module<KE, EP>` stores flat `ir_node` records with children in a separate sidecar vector — enabling egraph views, adjacency queries, and hash-cons interning. Frontends needing those capabilities should use `ir_module` directly (see `crank_ir_module` in `build_ast.hpp`).
+**Relationship to `ir_module`:** `ast_arena<NodeVariant>` stores `std::variant` nodes with children embedded inside each
+variant alternative. `ir_module<KE, EP>` stores flat `ir_node` records with children in a separate sidecar vector —
+enabling egraph views, adjacency queries, and hash-cons interning. Frontends needing those capabilities should use
+`ir_module` directly (see `crank_ir_module` in `build_ast.hpp`).
 
 **API:**
 
@@ -803,7 +811,8 @@ using crank_ir_module = lang::ir_module<crank_kind, crank_node_ext>;  // flat ir
 ```
 
 `crank_ast_arena` retains the variant-node model for backward compatibility.  
-`crank_ir_module` is the ir_module-based store — children in a flat sidecar, `structural_hash` in `ir_node`, egraph/adjacency views available. Parser (lexy) is unchanged for both.
+`crank_ir_module` is the ir_module-based store — children in a flat sidecar, `structural_hash` in `ir_node`,
+egraph/adjacency views available. Parser (lexy) is unchanged for both.
 
 ### 2. Module System Bridge
 
@@ -908,26 +917,26 @@ Implement constraint/rewrite rules by extending `lang::rules::rule_registry` or 
 
 ## File Reference
 
-| Header                       | Purpose                           | Depends On                   |
-|------------------------------|-----------------------------------|------------------------------|
-| `generic.hpp`                | Umbrella include                  | All submodules               |
-| `core/identity.hpp`          | Stable IDs, fingerprints          | None                         |
-| `core/diagnostics.hpp`       | Severity, diagnostic sink         | None                         |
-| `core/reflection.hpp`        | Callable traits, thunks           | identity.hpp                 |
-| `core/source_location.hpp`   | Source positions                  | None                         |
-| `core/rich_diagnostic.hpp`   | Annotated diagnostics             | diagnostics.hpp              |
-| `core/parse_stats.hpp`       | Parser metrics                    | None                         |
-| `host/descriptors.hpp`       | Function/type/field/resource base | identity.hpp, reflection.hpp |
-| `host/effects.hpp`           | Effect/capability system          | vakya/types/effect.hpp       |
-| `host/registry.hpp`          | Descriptor registry               | descriptors.hpp              |
-| `module/module_system.hpp`   | Module descriptors                | identity.hpp                 |
-| `module/import_resolver.hpp` | 9-tier resolver, dep graph        | module_system.hpp            |
-| `semantic/symbol_table.hpp`  | Scoped symbol table               | diagnostics.hpp              |
-| `semantic/rules.hpp`         | Rules registry                    | None                         |
-| `semantic/proof.hpp`         | Proof obligations                 | None                         |
-| `ast/ast_arena.hpp`          | Flat AST storage                  | None                         |
-| `lexer/digit_sep.hpp`        | Numeric literal utilities         | None                         |
-| `samasa/samasa.hpp`          | PEG grammar + scanner + CST parser umbrella | meta.hpp, core/     |
+| Header                       | Purpose                                     | Depends On                   |
+|------------------------------|---------------------------------------------|------------------------------|
+| `generic.hpp`                | Umbrella include                            | All submodules               |
+| `core/identity.hpp`          | Stable IDs, fingerprints                    | None                         |
+| `core/diagnostics.hpp`       | Severity, diagnostic sink                   | None                         |
+| `core/reflection.hpp`        | Callable traits, thunks                     | identity.hpp                 |
+| `core/source_location.hpp`   | Source positions                            | None                         |
+| `core/rich_diagnostic.hpp`   | Annotated diagnostics                       | diagnostics.hpp              |
+| `core/parse_stats.hpp`       | Parser metrics                              | None                         |
+| `host/descriptors.hpp`       | Function/type/field/resource base           | identity.hpp, reflection.hpp |
+| `host/effects.hpp`           | Effect/capability system                    | vakya/types/effect.hpp       |
+| `host/registry.hpp`          | Descriptor registry                         | descriptors.hpp              |
+| `module/module_system.hpp`   | Module descriptors                          | identity.hpp                 |
+| `module/import_resolver.hpp` | 9-tier resolver, dep graph                  | module_system.hpp            |
+| `semantic/symbol_table.hpp`  | Scoped symbol table                         | diagnostics.hpp              |
+| `semantic/rules.hpp`         | Rules registry                              | None                         |
+| `semantic/proof.hpp`         | Proof obligations                           | None                         |
+| `ast/ast_arena.hpp`          | Flat AST storage                            | None                         |
+| `lexer/digit_sep.hpp`        | Numeric literal utilities                   | None                         |
+| `samasa/samasa.hpp`          | PEG grammar + scanner + CST parser umbrella | meta.hpp, core/              |
 
 ---
 

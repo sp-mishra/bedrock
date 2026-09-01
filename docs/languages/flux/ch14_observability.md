@@ -5,6 +5,7 @@
 Flux programs are **fully observable** at compile-time and runtime via **Nadi telemetry**.
 
 Every compilation and execution produces structured **phase events** that reveal:
+
 - Where time is spent (lexing? typechecking? GPU dispatch?)
 - Backend decisions and why
 - Cost model predictions vs. actual performance
@@ -17,10 +18,12 @@ Every compilation and execution produces structured **phase events** that reveal
 ## See It in Action
 
 Architecture example shows observability instrumentation:
-[`src/examples/languages/flux/flux_compiler_architecture.hpp`](../../../src/examples/languages/flux/flux_compiler_architecture.hpp)
+[
+`src/examples/languages/flux/flux_compiler_architecture.hpp`](../../../src/examples/languages/flux/flux_compiler_architecture.hpp)
 (Search for `verify_three_path_invariant()` and `compilation_pipeline`)
 
 Output shows phase breakdown:
+
 - Path tracing (lexy → parser → AST builder)
 - Type pipeline (name resolution → type inference → shape inference)
 - Lowering and optimization phases
@@ -54,7 +57,7 @@ struct phase_event {
 [Lexer] 0.5 ms (CPU)
 ```
 
-Tokenizes source. Time grows with source size O(n).
+Tokenizes source. Time grows with source size O (n).
 
 ### Parsing
 
@@ -62,7 +65,7 @@ Tokenizes source. Time grows with source size O(n).
 [Parser] 1.2 ms (CPU)
 ```
 
-Converts tokens to AST. Time is O(n) for well-formed input.
+Converts tokens to AST. Time is O (n) for well-formed input.
 
 ### Name Resolution
 
@@ -189,6 +192,7 @@ flux::write_flame_graph_json("trace.json", events);
 ```
 
 JSON format:
+
 ```json
 [
   {
@@ -329,6 +333,7 @@ flux::set_log_level(flux::LogLevel::Trace);
 ```
 
 Output includes:
+
 - Every kernel compiled
 - Every decision point (why Metal won over SIMD?)
 - Device memory allocations

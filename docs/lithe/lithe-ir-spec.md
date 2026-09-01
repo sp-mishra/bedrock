@@ -49,8 +49,8 @@ This specification covers:
 - Schema versioning and the compatibility predicate.
 - The stability contract for tool builders and language front-end authors.
 
-This spec does NOT define execution semantics, backend ABI, code generation
-strategy, or optimizer pass ordering. Those are implementation concerns.
+This spec does NOT define execution semantics, backend ABI, code generation strategy, or optimizer pass ordering. Those
+are implementation concerns.
 
 ### §1.2 Audience
 
@@ -72,16 +72,14 @@ Three conformance targets are defined:
 
 ### §1.4 RFC 2119 Usage
 
-The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
-RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
-described in RFC 2119.
+The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT, RECOMMENDED, MAY, and OPTIONAL in this
+document are to be interpreted as described in RFC 2119.
 
 ---
 
 ## §2 — Representation Model (live vs portable)
 
-Lithe uses a **two-representation model**. External tools interact exclusively
-with the **portable/wire** forms.
+Lithe uses a **two-representation model**. External tools interact exclusively with the **portable/wire** forms.
 
 | Attribute  | Live (`hl_mir_function`)                     | Portable/Wire (`lithe_*_ir` + `portable_module`)           |
 |------------|----------------------------------------------|------------------------------------------------------------|
@@ -91,13 +89,11 @@ with the **portable/wire** forms.
 | Stability  | NOT a wire contract; integers MAY change     | The interchange contract; stable across schema minor bumps |
 | Header     | `lithe_codegen_hl.hpp`                       | `lithe_ir/adapters/hl_mir.hpp`, `portable/module.hpp`      |
 
-**Rule**: Only the portable/wire forms are stable across processes or schema
-versions. Live forms are implementation detail and MAY change without a schema
-bump. A Producer MUST freeze to a wire form before handing IR to an external
+**Rule**: Only the portable/wire forms are stable across processes or schema versions. Live forms are implementation
+detail and MAY change without a schema bump. A Producer MUST freeze to a wire form before handing IR to an external
 consumer.
 
-The freeze/thaw bridge (`lithe_ir/portable/bridge.hpp`) is the only sanctioned
-path between live and portable forms.
+The freeze/thaw bridge (`lithe_ir/portable/bridge.hpp`) is the only sanctioned path between live and portable forms.
 
 ---
 
@@ -116,8 +112,8 @@ Source: `include/lithe/lithe_ir/format.hpp` — `lithe::ir::stage`.
 | `physical`  | **4**   | Physical register MIR              |
 | `managed`   | **5**   | Managed-annotated MIR (`lithe_rt`) |
 
-Stage integer values are **STABLE**: they MUST NOT be renumbered within a major
-schema version. Changing a stage integer is a major-version breaking change.
+Stage integer values are **STABLE**: they MUST NOT be renumbered within a major schema version. Changing a stage integer
+is a major-version breaking change.
 
 ### §3.2 Family–Stage Mapping
 
@@ -146,27 +142,23 @@ All on-wire scalars MUST be fixed-width little-endian integers:
 | `std::int64_t`  | 8 bytes    | LE two's complement |
 | `double`        | 8 bytes    | IEEE 754 LE         |
 
-`size_t`, raw pointers, and host-native types MUST NOT appear on the wire.
-The canonical wire endian is `wire_endian::little` (value 0).
+`size_t`, raw pointers, and host-native types MUST NOT appear on the wire. The canonical wire endian is
+`wire_endian::little` (value 0).
 
 ### §4.2 Id Spaces
 
-All ids within a single IR document are dense `std::uint32_t` values assigned
-in **canonical first-seen structural order** (as produced by `freeze` or a
-spec-conformant encoder). Id 0 is valid.
+All ids within a single IR document are dense `std::uint32_t` values assigned in **canonical first-seen structural
+order** (as produced by `freeze` or a spec-conformant encoder). Id 0 is valid.
 
 ### §4.3 String Tables
 
-Each IR document carries an independent string table (`std::vector<std::string>`).
-Strings are referenced by `uint32_t` index. Duplicate strings MUST be
-deduplicated by a conformant encoder. The canonical order of strings in the
-`canonical_encode` preimage is **lexicographic by content** (insertion order
-MUST NOT appear in the output).
+Each IR document carries an independent string table (`std::vector<std::string>`). Strings are referenced by `uint32_t`
+index. Duplicate strings MUST be deduplicated by a conformant encoder. The canonical order of strings in the
+`canonical_encode` preimage is **lexicographic by content** (insertion order MUST NOT appear in the output).
 
 ### §4.4 Section Ids (STABLE)
 
-Section ids are stable string constants. Changing a section id string is a
-major-version breaking change.
+Section ids are stable string constants. Changing a section id string is a major-version breaking change.
 
 Graph IR sections (`lithe_ir/adapters/graph.hpp`):
 
@@ -203,12 +195,10 @@ Physical MIR sections (`lithe_ir/adapters/physical_mir.hpp`):
 
 `schema_version{major, minor, patch}`:
 
-- **major** bump: breaking wire change (removed field, changed encoding,
-  renamed section id, renumbered stage). A Consumer MUST reject a document
-  whose major version it does not support.
-- **minor** bump: additive-compatible change (new optional op, new optional
-  field a tolerant consumer may skip). A Consumer that supports minor M MUST
-  accept documents at minor ≤ M of the same major.
+- **major** bump: breaking wire change (removed field, changed encoding, renamed section id, renumbered stage). A
+  Consumer MUST reject a document whose major version it does not support.
+- **minor** bump: additive-compatible change (new optional op, new optional field a tolerant consumer may skip). A
+  Consumer that supports minor M MUST accept documents at minor ≤ M of the same major.
 - **patch** bump: editorial clarification; no wire change.
 
 ---
@@ -240,20 +230,18 @@ dim        = digits | "?" ;          (* "?" = dynamic / unknown at compile time 
 - `"i1"` is the canonical spelling for boolean type.
 - `memref<…>` requires at least one explicit dim before the element scalar.
   `memref<xi32>` (missing dim) is INVALID.
-- strides are NOT part of the canonical type string grammar for the purpose of
-  type identity; stride annotations live in `memref_desc` attribute payloads.
+- strides are NOT part of the canonical type string grammar for the purpose of type identity; stride annotations live in
+  `memref_desc` attribute payloads.
 
 ### §5.3 Parser Contract
 
 `detail::type_str_parseable(s)` MUST:
 
 - Accept all strings matching the grammar above.
-- Reject all strings not matching (including empty string, whitespace, wrong
-  case, wrong prefix).
+- Reject all strings not matching (including empty string, whitespace, wrong case, wrong prefix).
 - Be the single authoritative gate used in the `T`-check of `verify_portable`.
 
-The spec-pinning test (`test_lithe_ir_spec_conformance.cpp §3`) validates the
-accept/reject tables:
+The spec-pinning test (`test_lithe_ir_spec_conformance.cpp §3`) validates the accept/reject tables:
 
 **Must accept**: `"i1"`, `"i8"`, `"i16"`, `"i32"`, `"i64"`, `"f16"`, `"f32"`,
 `"f64"`, `"i128"`, `"opaque64"`, `"memref<4xi32>"`, `"memref<2x?xi64>"`.
@@ -308,8 +296,7 @@ graph_node {
 ### §6.4 `graph_op_identity`
 
 Op identity is the stable `(op_domain, op_name)` pair plus `schema_version`
-for upgrade routing. Integer id fields MUST NOT be used as op identity across
-schema versions.
+for upgrade routing. Integer id fields MUST NOT be used as op identity across schema versions.
 
 ### §6.5 Structural Validity Invariant
 
@@ -384,10 +371,8 @@ hl_wire_region { id: uint32_t; block_ids: vector<uint32_t>; arg_ids: vector<uint
 ### §7.5 Opcode Identity Contract
 
 Opcode identity is the stable `(domain, name)` string pair. The live
-`hl_opcode` enum integers are **NOT a contract** — they MAY change across
-schema minor bumps without a major-version bump. The `(domain, name)` set at a
-given schema version IS the contract. The normative opcode set is the table in
-§8.
+`hl_opcode` enum integers are **NOT a contract** — they MAY change across schema minor bumps without a major-version
+bump. The `(domain, name)` set at a given schema version IS the contract. The normative opcode set is the table in §8.
 
 ### §7.6 Attribute Payload Layouts
 
@@ -404,10 +389,9 @@ for_attr {
 }
 ```
 
-Producer note: implementations MAY track additional bounded-loop optimization hints
-(for example `bounds_known`, `stride_regular`, `trip_count_hint`) in live IR or
-tool-local side tables. Such hints are non-semantic metadata and MUST NOT change
-program meaning; consumers MAY ignore them.
+Producer note: implementations MAY track additional bounded-loop optimization hints (for example `bounds_known`,
+`stride_regular`, `trip_count_hint`) in live IR or tool-local side tables. Such hints are non-semantic metadata and MUST
+NOT change program meaning; consumers MAY ignore them.
 
 **`memref_desc`** (present for load/store ops):
 
@@ -509,8 +493,7 @@ A well-formed HL MIR document MUST satisfy (checked by `R`-check in §13):
 Source: `include/lithe/lithe_ir/portable/verify.hpp` —
 `k_opcode_signatures` (48-entry `constexpr` array).
 
-The registry is the **single source of truth** shared by the verifier (T/E/K
-checks) and the optimizer legality tables.
+The registry is the **single source of truth** shared by the verifier (T/E/K checks) and the optimizer legality tables.
 
 ### §8.1 Signature Entry Fields
 
@@ -589,8 +572,7 @@ Column `may_trap` added in schema 1.3.0; false for all pre-1.3.0 ops.
 
 ### §8.3 Producer/Consumer Obligations
 
-- A Producer MUST emit ops whose `(arity, result_count)` satisfies their table
-  entry.
+- A Producer MUST emit ops whose `(arity, result_count)` satisfies their table entry.
 - A Consumer MUST reject ops violating their table entry.
 - Unknown ops MAY be tolerated when `verify_policy::allow_unknown_optional_ops
   == true`; they MUST be rejected otherwise.
@@ -623,8 +605,8 @@ wire_preg        { id: uint16_t; name: string }   -- name is INFORMATIONAL ONLY
 wire_spill_slot  { id: uint32_t; size_bytes: uint32_t; align_log2: uint8_t; frame_offset: int32_t }
 ```
 
-`wire_preg::name` (e.g. `"x0"`, `"rax"`) is informational only. It MUST NOT
-be used as ABI identity; it is not stable across schema versions.
+`wire_preg::name` (e.g. `"x0"`, `"rax"`) is informational only. It MUST NOT be used as ABI identity; it is not stable
+across schema versions.
 
 ### §9.3 `wire_operand` Kind Union
 
@@ -745,9 +727,8 @@ portable_capability_bit (uint32_t bitmask):
 
 ### §10.5 ABI Ownership
 
-Lithe does NOT synthesize ABI. Imports, exports, globals, and constants are
-**host-supplied** at module construction time. A Producer MUST populate these
-fields; a Consumer reads them as-provided and MUST NOT infer ABI from them.
+Lithe does NOT synthesize ABI. Imports, exports, globals, and constants are **host-supplied** at module construction
+time. A Producer MUST populate these fields; a Consumer reads them as-provided and MUST NOT infer ABI from them.
 
 ---
 
@@ -758,32 +739,28 @@ Source: `include/lithe/lithe_ir/portable/digest.hpp` — `canonical_encode`,
 
 ### §11.1 Canonical Encoding Rules
 
-`canonical_encode(module)` produces a deterministic byte sequence (the digest
-preimage) by applying the following rules in order:
+`canonical_encode(module)` produces a deterministic byte sequence (the digest preimage) by applying the following rules
+in order:
 
-1. **Fixed section order**: module header, manifest, imports, exports, globals,
-   constants, per-function data. Section order is fixed; a Consumer MUST NOT
-   assume sections appear in a different order.
+1. **Fixed section order**: module header, manifest, imports, exports, globals, constants, per-function data. Section
+   order is fixed; a Consumer MUST NOT assume sections appear in a different order.
 2. **Values by canonical id**: SSA values emitted in ascending `id` order.
-3. **Ops by structural order**: ops emitted in op-table order, which equals
-   canonical dense assignment order (as produced by `freeze`).
-4. **String table content-sorted**: all strings are interned during the pass,
-   then sorted lexicographically by content before `finalize_string_table()`.
-   String references in the output are remapped indices into this sorted table.
-   **No unordered-container iteration** reaches the output byte sequence.
-5. **Fixed LE widths**: all scalars are fixed-width LE as per §4.1. No padding
-   entropy.
+3. **Ops by structural order**: ops emitted in op-table order, which equals canonical dense assignment order (as
+   produced by `freeze`).
+4. **String table content-sorted**: all strings are interned during the pass, then sorted lexicographically by content
+   before `finalize_string_table()`. String references in the output are remapped indices into this sorted table. **No
+   unordered-container iteration** reaches the output byte sequence.
+5. **Fixed LE widths**: all scalars are fixed-width LE as per §4.1. No padding entropy.
 
 ### §11.2 Determinism Guarantee
 
-Identical logical `portable_module` (same structure and values, regardless of
-construction or allocation order) MUST produce:
+Identical logical `portable_module` (same structure and values, regardless of construction or allocation order) MUST
+produce:
 
 - Identical `canonical_encode` bytes.
 - Identical `semantic_digest`.
 
-This guarantee holds across processes and platforms that use the same schema
-version.
+This guarantee holds across processes and platforms that use the same schema version.
 
 ### §11.3 Semantic vs Payload Digest
 
@@ -792,9 +769,8 @@ version.
 | **Semantic** (`semantic_digest`)                 | `digest_alg(canonical_encode(module))` | Stable: same program → same digest across re-encodings                      | Program identity / content-addressed caching |
 | **Payload** (`binary_ir_envelope::digest_bytes`) | `digest_alg(wire_bytes)`               | Changes whenever wire representation changes (re-compression, schema patch) | Wire artifact integrity                      |
 
-These two digests are **intentionally distinct**. A Consumer MUST NOT confuse
-them. Equality of semantic digests means the programs are semantically
-identical; equality of payload digests means the wire bytes are identical.
+These two digests are **intentionally distinct**. A Consumer MUST NOT confuse them. Equality of semantic digests means
+the programs are semantically identical; equality of payload digests means the wire bytes are identical.
 
 ### §11.4 `semantic_digest` Definition
 
@@ -822,13 +798,11 @@ Every binary Lithe IR document begins with the 4-byte magic:
 k_binary_ir_magic = { 0x4C, 0x54, 0x49, 0x52 }   // "LTIR"
 ```
 
-A Consumer MUST reject any document whose first four bytes do not equal this
-magic before any further processing.
+A Consumer MUST reject any document whose first four bytes do not equal this magic before any further processing.
 
 ### §12.2 `binary_ir_envelope` Structure
 
-The envelope header (all fields fixed-width, no `size_t`, no host-native types,
-all LE):
+The envelope header (all fields fixed-width, no `size_t`, no host-native types, all LE):
 
 ```
 binary_ir_envelope {
@@ -896,12 +870,9 @@ A Consumer MUST validate in this exact order:
 
 1. **Structural limits** — magic, `format_major`, `target_address_width != 0`,
    `payload_size ≤ max_payload_size`, `maximum_decoded_size ≤ max_decoded_size`,
-   `section_count ≤ max_section_count`, section directory bounds. Done BEFORE
-   any large allocation.
-2. **Integrity** — payload digest verification (`digest_alg` + `digest_bytes`).
-   Done BEFORE any decode.
-3. **Authenticity** — signature verification (`sig_alg` + `sig_bytes`). Done
-   BEFORE the IR is trusted or compiled.
+   `section_count ≤ max_section_count`, section directory bounds. Done BEFORE any large allocation.
+2. **Integrity** — payload digest verification (`digest_alg` + `digest_bytes`). Done BEFORE any decode.
+3. **Authenticity** — signature verification (`sig_alg` + `sig_bytes`). Done BEFORE the IR is trusted or compiled.
 4. **Decode** — parse section data into IR structure.
 5. **Compatibility** — run `verify_portable` + compatibility predicate (§14).
 
@@ -922,12 +893,11 @@ section_entry {
 
 ### §12.7 Text IR
 
-The canonical text form is the deterministic, round-trippable rendering
-produced by `text_provider`. Round-tripping MUST preserve `semantic_digest`.
+The canonical text form is the deterministic, round-trippable rendering produced by `text_provider`. Round-tripping MUST
+preserve `semantic_digest`.
 
-`human_pretty` (from `ir_inspector`) is explicitly **non-normative**: it MUST
-NOT be fed to a decoder. Decoders MUST reject any text document whose header
-does not conform to the `text_provider` format.
+`human_pretty` (from `ir_inspector`) is explicitly **non-normative**: it MUST NOT be fed to a decoder. Decoders MUST
+reject any text document whose header does not conform to the `text_provider` format.
 
 ### §12.8 `envelope_limits` Defaults
 
@@ -989,13 +959,12 @@ Each failure emits a `lithe::diag::diagnostic` with a stable `code`:
 | K     | `LITHE-PORT-K001` | required capability not declared                                                            |
 | L     | `LITHE-PORT-L001` | count exceeds configured limit                                                              |
 
-Diagnostic codes are **STABLE** — they MUST NOT be changed or removed within a
-major schema version.
+Diagnostic codes are **STABLE** — they MUST NOT be changed or removed within a major schema version.
 
 ### §13.3 Trust Boundary Rule
 
-A Consumer MUST run `verify_portable` at the trust boundary before using any
-IR. Trusting unverified IR is a security defect.
+A Consumer MUST run `verify_portable` at the trust boundary before using any IR. Trusting unverified IR is a security
+defect.
 
 ---
 
@@ -1009,8 +978,7 @@ See §4.5 for the major/minor/patch rules.
 
 ### §14.2 Compatibility Predicate
 
-A module is compatible with a consumer iff ALL of the following hold
-(conjunctive — never optimistic):
+A module is compatible with a consumer iff ALL of the following hold (conjunctive — never optimistic):
 
 1. **Schema supported**: consumer declares support for the module's `schema_version.major`.
 2. **ABI compatible**: import `abi` versions are supported by the runtime.
@@ -1019,21 +987,19 @@ A module is compatible with a consumer iff ALL of the following hold
 5. **External symbols resolve**: all `required == true` imports resolve in the consumer's symbol table.
 6. **Security policy permits**: envelope signature + digest policy checks pass.
 
-Failure of any one condition MUST produce a rejection with a diagnostic. No
-partial acceptance.
+Failure of any one condition MUST produce a rejection with a diagnostic. No partial acceptance.
 
 ### §14.3 Upgrade
 
-An upgrader maps IR at schema `{M, m, p}` to schema `{M, m+1, 0}` or higher
-within the same major. Every upgrader MUST be:
+An upgrader maps IR at schema `{M, m, p}` to schema `{M, m+1, 0}` or higher within the same major. Every upgrader MUST
+be:
 
 - **Versioned**: carries the source and target `schema_version`.
 - **Tested**: covered by a unit test asserting round-trip + semantic equivalence.
-- **Recorded in provenance**: the upgrader id and versions are appended to the
-  module's provenance chain (impl-3).
+- **Recorded in provenance**: the upgrader id and versions are appended to the module's provenance chain (impl-3).
 
-An op with no registered upgrade path MUST be rejected when schema promotion is
-required; it MUST NOT be silently dropped.
+An op with no registered upgrade path MUST be rejected when schema promotion is required; it MUST NOT be silently
+dropped.
 
 ### §14.4 What a Minor Bump MAY Add
 
@@ -1051,8 +1017,8 @@ required; it MUST NOT be silently dropped.
 
 ### §14.6 Language-Control Extension — Staged Schema Minors
 
-The language-control extension was introduced across five consecutive minor
-bumps. Each minor is strictly additive (§14.4):
+The language-control extension was introduced across five consecutive minor bumps. Each minor is strictly additive
+(§14.4):
 
 | Schema | New ops                                                                                          | New diagnostic codes                                                    | Notes                                                    |
 |--------|--------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|----------------------------------------------------------|
@@ -1063,8 +1029,8 @@ bumps. Each minor is strictly additive (§14.4):
 | 1.4.0  | `cleanup_region`, `cleanup_yield`                                                                | E003, R003                                                              | defer/cleanup scopes; requires `defer_scopes` capability |
 | 1.5.0  | `tx.region`, `tx.read`, `tx.write`, `tx.abort`, `tx.yield`                                       | E002                                                                    | transactions; requires `transactions` capability         |
 
-A consumer that supports schema `{1, N, *}` MUST tolerate all ops from minors ≤ N
-and MAY reject ops from minors > N when `allow_unknown_optional_ops == false`.
+A consumer that supports schema `{1, N, *}` MUST tolerate all ops from minors ≤ N and MAY reject ops from minors > N
+when `allow_unknown_optional_ops == false`.
 
 ---
 
@@ -1075,20 +1041,18 @@ Source: `include/lithe/lithe_ir/inspect/inspect.hpp` (umbrella),
 
 ### §15.1 Sanctioned Read Surface
 
-`lithe::ir::inspect::ir_inspector` and `ir_view` are the **sanctioned, supported
-read surface** for observing Lithe IR. Tools SHOULD use the facade.
+`lithe::ir::inspect::ir_inspector` and `ir_view` are the **sanctioned, supported read surface** for observing Lithe IR.
+Tools SHOULD use the facade.
 
 Direct adapter walking (`lithe_graph_ir::nodes`, `lithe_hl_mir_ir::ops`, etc.)
-is permitted but the facade is the **compatibility-stable path**: the inspector
-API is versioned and will receive compatibility shims across schema minor bumps;
-direct adapter structs may gain new fields that change access patterns.
+is permitted but the facade is the **compatibility-stable path**: the inspector API is versioned and will receive
+compatibility shims across schema minor bumps; direct adapter structs may gain new fields that change access patterns.
 
 ### §15.2 Observation = Verification = Digest
 
 What `ir_inspector` observes is what `verify_portable` verifies and what
-`canonical_encode` encodes. There is no divergent "pretty" representation on
-the normative path.  `human_pretty` (inspector method) is non-normative and
-MUST NOT be decoded or round-tripped.
+`canonical_encode` encodes. There is no divergent "pretty" representation on the normative path.  `human_pretty`
+(inspector method) is non-normative and MUST NOT be decoded or round-tripped.
 
 ---
 
@@ -1129,9 +1093,8 @@ External designers MUST consult this section first.
 Source: `include/lithe/lithe_ir/frontend/lowering_contract.hpp` — namespace
 `lithe::ir::frontend`.
 
-This section documents the authoritative contract between language frontends
-(Crank, Sutra, future languages) and the Lithe IR boundary. Every frontend
-MUST lower through these APIs. Informal per-frontend type rules are prohibited.
+This section documents the authoritative contract between language frontends (Crank, Sutra, future languages) and the
+Lithe IR boundary. Every frontend MUST lower through these APIs. Informal per-frontend type rules are prohibited.
 
 ### §17.1 Purpose and Scope
 
@@ -1140,8 +1103,7 @@ The frontend lowering contract:
 1. Provides the single source of truth for source-type → IR-type mapping.
 2. Prevents frontends from inventing divergent lowering rules.
 3. Validates that derived type strings are §5-conformant before they enter IR.
-4. Maps source-level features to the `portable_capability_bit` that a module
-   MUST declare when those features are used.
+4. Maps source-level features to the `portable_capability_bit` that a module MUST declare when those features are used.
 
 ### §17.2 Scalar Type Mapping (STABLE)
 
@@ -1176,8 +1138,7 @@ A Producer MUST call `lower_tensor_type` which chains §5 validation.
 
 ### §17.4 Capability Mapping (STABLE)
 
-`crank_capability_required(crank_feature)` maps source features to capability bits
-(§10.3 of this spec).
+`crank_capability_required(crank_feature)` maps source features to capability bits (§10.3 of this spec).
 
 | `crank_feature` | `portable_capability_bit` |
 |-----------------|---------------------------|
@@ -1193,9 +1154,8 @@ A Producer MUST call `lower_tensor_type` which chains §5 validation.
 
 ### §17.5 Validation
 
-`validate_ir_type_str(s)` is a lightweight §5 gate callable without the full
-verifier. It MUST accept all strings matching the §5 grammar and reject all
-others. It is used internally by `lower_scalar_type` and `lower_tensor_type`.
+`validate_ir_type_str(s)` is a lightweight §5 gate callable without the full verifier. It MUST accept all strings
+matching the §5 grammar and reject all others. It is used internally by `lower_scalar_type` and `lower_tensor_type`.
 
 ### §17.6 Conformance Obligation
 
@@ -1208,14 +1168,13 @@ A conformant frontend Producer:
   `declared_capabilities`.
 - MUST NOT emit an IR type string that was not validated through
   `validate_ir_type_str` (or the higher-level `lower_*` helpers).
-- MUST use the stable string tables (§17.7) for all predicate, guard, trap,
-  policy, and isolation index fields in wire attr payloads.
+- MUST use the stable string tables (§17.7) for all predicate, guard, trap, policy, and isolation index fields in wire
+  attr payloads.
 
 ### §17.7 Stable String Tables (STABLE)
 
-These tables are the single source of truth for string-indexed attr fields.
-Every frontend MUST use these canonical strings; index positions are stable
-within a major schema version.
+These tables are the single source of truth for string-indexed attr fields. Every frontend MUST use these canonical
+strings; index positions are stable within a major schema version.
 
 **Integer compare predicates** (`k_icmp_predicates` — 10 entries):
 

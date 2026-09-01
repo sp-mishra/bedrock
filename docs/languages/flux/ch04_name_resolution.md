@@ -23,12 +23,12 @@ Lookup: search from top (innermost) to bottom. First match wins. Lookup failure 
 
 ### Algorithms
 
-| Step | Algorithm |
-|------|-----------|
-| Scope push/pop | Stack — O(1) |
-| Symbol lookup | Hash map per scope — O(1) average |
+| Step               | Algorithm                                  |
+|--------------------|--------------------------------------------|
+| Scope push/pop     | Stack — O(1)                               |
+| Symbol lookup      | Hash map per scope — O(1) average          |
 | Forward references | Two-pass: hoist declarations, then resolve |
-| Cycle detection | Topological sort over the dependency graph |
+| Cycle detection    | Topological sort over the dependency graph |
 
 ### Forward References
 
@@ -40,6 +40,7 @@ fn square(x) { x*x }
 ```
 
 Algorithm: **two-pass**
+
 1. First pass: insert all top-level `fn` and `input` declarations into the module scope.
 2. Second pass: resolve all expressions.
 
@@ -185,8 +186,7 @@ void resolver::resolve_expr(node_idx idx) {
 
 ## Builtin Functions
 
-Flux provides a set of builtin functions. They are installed into the root scope before user code is
-processed.
+Flux provides a set of builtin functions. They are installed into the root scope before user code is processed.
 
 ```cpp
 void resolver::install_builtins() {
@@ -241,15 +241,14 @@ lookup(name) → optional<Value>  // search from innermost scope outward
 lookup_local(name) → optional<Value>  // current scope only (shadow detection)
 ```
 
-It supports a pluggable **visibility policy** (defaulting to lexical/all-visible). Crank uses the same
-table for its module system. Flux uses the default policy.
+It supports a pluggable **visibility policy** (defaulting to lexical/all-visible). Crank uses the same table for its
+module system. Flux uses the default policy.
 
 ---
 
 ## Dependency Graph for Let Bindings
 
-For `let` bindings that reference each other (disallowed in Flux top level, allowed inside blocks), we
-detect cycles:
+For `let` bindings that reference each other (disallowed in Flux top level, allowed inside blocks), we detect cycles:
 
 ```cpp
 // Cycle check: DFS over the "rhs references name" graph
@@ -312,5 +311,5 @@ int main() {
 
 ## Next
 
-[Chapter 5 → Type Inference](ch05_type_inference.md) — infer types for every expression using
-Hindley-Milner Algorithm W.
+[Chapter 5 → Type Inference](ch05_type_inference.md) — infer types for every expression using Hindley-Milner Algorithm
+W.

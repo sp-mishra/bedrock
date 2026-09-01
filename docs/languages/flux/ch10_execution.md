@@ -2,9 +2,9 @@
 
 ## Overview
 
-Flux (and the equivalent C++ EDSL) exposes a fluent introspection API on every expression. These
-methods mirror each other exactly — the same call on a Vakya expression works whether it came from
-parsing Flux source or from writing C++ directly.
+Flux (and the equivalent C++ EDSL) exposes a fluent introspection API on every expression. These methods mirror each
+other exactly — the same call on a Vakya expression works whether it came from parsing Flux source or from writing C++
+directly.
 
 ```
 expr.show_vakya()       -- print the expression tree
@@ -36,8 +36,8 @@ expr.tune()             -- autotune backend parameters
 The introspection API is implemented as a thin wrapper around `lithe::shared_expr`. In the C++ EDSL,
 `lithe::shared_expr` gains these methods via a CRTP mixin or free functions.
 
-For the Flux frontend, we wrap the lowered `shared_expr` in a `flux::value` type that delegates
-to the same underlying machinery.
+For the Flux frontend, we wrap the lowered `shared_expr` in a `flux::value` type that delegates to the same underlying
+machinery.
 
 ```cpp
 // include/languages/flux/value.hpp
@@ -348,5 +348,5 @@ C
 
 ## Next
 
-[Chapter 11 → Backend Validation](ch11_validation.md) — `verify_backends()` ensures all backends
-produce identical results.
+[Chapter 11 → Backend Validation](ch11_validation.md) — `verify_backends()` ensures all backends produce identical
+results.

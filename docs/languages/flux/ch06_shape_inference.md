@@ -2,8 +2,8 @@
 
 ## Why Shapes Are Not Just Types
 
-After Chapter 5's HM type inference, every expression in the Flux AST has a *type* — but types
-alone are not enough for tensor computation. Consider:
+After Chapter 5's HM type inference, every expression in the Flux AST has a *type* — but types alone are not enough for
+tensor computation. Consider:
 
 ```flux
 input A : tensor<f32>[4,8]
@@ -12,36 +12,35 @@ let C = matmul(A, B)
 ```
 
 Hindley-Milner can tell you that `matmul` takes two `tensor<f32>` arguments and returns a
-`tensor<f32>`. What it cannot tell you — because HM reasons about type constructors, not the
-*arguments* inside them — is the shape of the result. After pure type inference, all we know is:
+`tensor<f32>`. What it cannot tell you — because HM reasons about type constructors, not the *arguments* inside them —
+is the shape of the result. After pure type inference, all we know is:
 
 ```
 C : tensor<f32>[?,?]
 ```
 
-The `?` placeholders are dimension variables: unknowns that HM never filled in. Shape inference
-is the second constraint-solving phase whose entire purpose is to fill in every `?`.
+The `?` placeholders are dimension variables: unknowns that HM never filled in. Shape inference is the second
+constraint-solving phase whose entire purpose is to fill in every `?`.
 
 ### The type/shape distinction
 
 Two orthogonal concepts live inside a fully-annotated tensor type:
 
-| Concept | Example | What it tells you |
-|---------|---------|-------------------|
-| Element type | `f32` | What kind of number each cell holds |
-| Shape | `[4, 16]` | How many cells exist and how they are arranged |
+| Concept      | Example   | What it tells you                              |
+|--------------|-----------|------------------------------------------------|
+| Element type | `f32`     | What kind of number each cell holds            |
+| Shape        | `[4, 16]` | How many cells exist and how they are arranged |
 
 In Flux notation: `tensor<f32>[4,16]` packs both. The `<f32>` part is what HM solves. The `[4,16]`
 part is what shape inference solves.
 
 Standard HM type inference cannot handle shape because shapes are *indexed* types: the `16` in
-`[4,16]` is a *value* carried at the type level. HM operates over a first-order term algebra where
-type constructors take other type terms as arguments — not runtime-sized integers. Encoding shape
-into the type system would require dependent types or an indexed family, both of which push far
-beyond HM's decidable fragment.
+`[4,16]` is a *value* carried at the type level. HM operates over a first-order term algebra where type constructors
+take other type terms as arguments — not runtime-sized integers. Encoding shape into the type system would require
+dependent types or an indexed family, both of which push far beyond HM's decidable fragment.
 
-Flux sidesteps this by running shape inference as a completely separate phase after HM completes,
-using Vakya's shape constraint system (`vakya/types/shape.hpp`). The two phases share the same
+Flux sidesteps this by running shape inference as a completely separate phase after HM completes, using Vakya's shape
+constraint system (`vakya/types/shape.hpp`). The two phases share the same
 `type_arena` but reason about different dimensions of the type term.
 
 ### What shape inference delivers
@@ -54,9 +53,9 @@ let C = matmul(A, B)
 -- After shape inference:   C : tensor<f32>[4,16]
 ```
 
-Every subexpression in the program ends with a fully resolved shape stored in the `analysis_store`.
-Later compiler phases — vakya lowering, backend selection, memory layout computation — all rely on
-these shapes being fully concrete before they begin.
+Every subexpression in the program ends with a fully resolved shape stored in the `analysis_store`. Later compiler
+phases — vakya lowering, backend selection, memory layout computation — all rely on these shapes being fully concrete
+before they begin.
 
 ---
 
@@ -64,8 +63,8 @@ these shapes being fully concrete before they begin.
 
 ### Shape as a type-level entity
 
-A shape is an ordered tuple of *dimension terms*. In Flux, we write shapes inline with the tensor
-type, but inside the compiler shapes are stored as separate entities in the `type_arena` using the
+A shape is an ordered tuple of *dimension terms*. In Flux, we write shapes inline with the tensor type, but inside the
+compiler shapes are stored as separate entities in the `type_arena` using the
 `shape_type_tag` constructor (stable id 100).
 
 Formal grammar of shape terms:
@@ -82,8 +81,8 @@ dᵢ    ::= n                 concrete integer: 4, 8, 1024
         | dᵢ / n            quotient: N/2 (strided view)
 ```
 
-During the compilation of a typical program most dimensions are concrete integers. Dimension
-variables arise when:
+During the compilation of a typical program most dimensions are concrete integers. Dimension variables arise when:
+
 - A function parameter has a generic tensor shape (not yet instantiated)
 - A reshape target has one dimension spelled as `-1` (infer-from-product)
 - Broadcasting creates intermediate shapes where one dimension is not yet determined
@@ -92,12 +91,12 @@ variables arise when:
 
 Vakya interns shapes into the same `type_arena` used for regular type terms. A shape is just a
 `type_node` with `kind = constructor` and `descriptor_stable_id = 100` (the shape tag), whose
-`children` vector holds one `type_ref` per dimension. Each dimension is itself interned as a
-primitive type ref (for concrete values) or a variable type ref (for symbolic dims).
+`children` vector holds one `type_ref` per dimension. Each dimension is itself interned as a primitive type ref (for
+concrete values) or a variable type ref (for symbolic dims).
 
 The key consequence of hash-consing: two shapes with identical dimensions share the same
-`type_ref`. Shape equality is therefore O(1): compare handles, not trees. The entire set of
-distinct shapes in a typical program occupies a few hundred entries in the arena.
+`type_ref`. Shape equality is therefore O (1): compare handles, not trees. The entire set of distinct shapes in a
+typical program occupies a few hundred entries in the arena.
 
 ```
 type_arena memory layout for shapes (conceptual):
@@ -118,13 +117,14 @@ type_arena memory layout for shapes (conceptual):
 
 ## Dimension Unification
 
-Shape inference works by generating *shape constraints* from each operation, then solving them with
-the same unification machinery used for types. The difference: instead of equating type constructors
-(`f32 = f32`), we equate dimension terms (`K₁ = K₂`).
+Shape inference works by generating *shape constraints* from each operation, then solving them with the same unification
+machinery used for types. The difference: instead of equating type constructors (`f32 = f32`), we equate dimension terms
+(`K₁ = K₂`).
 
 ### The fundamental constraint: inner dimensions must agree
 
 For `matmul(A, B)` where `A : tensor<T>[M, K]` and `B : tensor<T>[K', N]`:
+
 - The columns of A and rows of B must match: `K = K'`
 - This is emitted as a `same_type` constraint between `dim(A, 1)` and `dim(B, 0)`
 - Unification solves it by binding `K' → K` (or vice versa)
@@ -172,16 +172,16 @@ Step-by-step shape inference:
 8. C : tensor<f32>[4, 16]   ✓
 ```
 
-Because `ref(8)` is the same interned handle on both sides of the constraint, unification succeeds
-immediately (identical refs — trivially equal). In the symbolic case (dim variables not yet bound),
-unification would produce a substitution `K' → K` and future lookups of `K'` would resolve to `K`.
+Because `ref(8)` is the same interned handle on both sides of the constraint, unification succeeds immediately
+(identical refs — trivially equal). In the symbolic case (dim variables not yet bound), unification would produce a
+substitution `K' → K` and future lookups of `K'` would resolve to `K`.
 
 ---
 
 ## The matmul Rule: Formal Derivation
 
-The typing judgment for `matmul` (using standard inference rule notation, horizontal line = "if
-premises above hold, conclude below"):
+The typing judgment for `matmul` (using standard inference rule notation, horizontal line = "if premises above hold,
+conclude below"):
 
 ```
 A : tensor<T>[M, K]    B : tensor<T>[K, N]
@@ -189,13 +189,13 @@ A : tensor<T>[M, K]    B : tensor<T>[K, N]
         matmul(A, B) : tensor<T>[M, N]
 ```
 
-Read: "if A is a rank-2 tensor of element type T with shape [M,K], and B is a rank-2 tensor of
-element type T with shape [K,N], then matmul(A,B) is a rank-2 tensor of element type T with shape
+Read: "if A is a rank-2 tensor of element type T with shape [M,K], and B is a rank-2 tensor of element type T with
+shape [K,N], then matmul (A,B) is a rank-2 tensor of element type T with shape
 [M,N]."
 
-The side condition implicit in this rule is `K = K` — the inner dimensions must be the same
-variable. In the concrete case `M=4, K=8, N=16` this becomes `8=8` (trivial). In the symbolic case
-with unannotated inputs it becomes an equality constraint solved by unification.
+The side condition implicit in this rule is `K = K` — the inner dimensions must be the same variable. In the concrete
+case `M=4, K=8, N=16` this becomes `8=8` (trivial). In the symbolic case with unannotated inputs it becomes an equality
+constraint solved by unification.
 
 ### Corresponding constraint emission in Vakya
 
@@ -248,8 +248,8 @@ The inputs must be rank-1 tensors of the same length. The constraint is:
 same_type(dim(u, 0), dim(v, 0))     (lengths must match)
 ```
 
-Result is a *scalar* of element type T — rank-0, no shape dimensions. In Vakya terms, the result
-shape is `make_scalar_shape(arena)` which interns an empty `Shape[]` constructor.
+Result is a *scalar* of element type T — rank-0, no shape dimensions. In Vakya terms, the result shape is
+`make_scalar_shape(arena)` which interns an empty `Shape[]` constructor.
 
 Implementation sketch:
 
@@ -284,8 +284,8 @@ A : tensor<T>[M, N]
 transpose(A) : tensor<T>[N, M]
 ```
 
-Transpose swaps the two dimensions. No constraint is emitted — the result shape is directly
-computed by reversing the children:
+Transpose swaps the two dimensions. No constraint is emitted — the result shape is directly computed by reversing the
+children:
 
 ```
 A: Shape[M, N]
@@ -296,8 +296,8 @@ result: Shape[N, M]
 ```
 
 No unification is needed: we know at compile time that transpose always produces `[N, M]` from
-`[M, N]`. The existing dimension refs are reused (no new interning of dimension values), only a
-new shape node is created holding them in swapped order.
+`[M, N]`. The existing dimension refs are reused (no new interning of dimension values), only a new shape node is
+created holding them in swapped order.
 
 Implementation sketch:
 
@@ -323,9 +323,8 @@ A : tensor<T>[d₁,...,dₙ]     ∏dᵢ = ∏eⱼ
 reshape(A, [e₁,...,eₘ]) : tensor<T>[e₁,...,eₘ]
 ```
 
-Reshape changes rank and all dimensions simultaneously, subject to the constraint that the total
-number of elements is preserved. The constraint is *arithmetic*: product of input dimensions must
-equal product of output dimensions.
+Reshape changes rank and all dimensions simultaneously, subject to the constraint that the total number of elements is
+preserved. The constraint is *arithmetic*: product of input dimensions must equal product of output dimensions.
 
 ```
 old product: d₁ * d₂ * ... * dₙ
@@ -333,9 +332,8 @@ new product: e₁ * e₂ * ... * eₘ
 constraint: old_product = new_product    (if both concrete: integer equality check)
 ```
 
-When both sides are fully concrete at compile time (the common case), this degenerates to an
-integer check. When either side contains symbolic dimensions, a `kDimEqKind` constraint is emitted
-for the Tarka SMT backend to discharge.
+When both sides are fully concrete at compile time (the common case), this degenerates to an integer check. When either
+side contains symbolic dimensions, a `kDimEqKind` constraint is emitted for the Tarka SMT backend to discharge.
 
 Implementation sketch:
 
@@ -380,8 +378,8 @@ A : tensor<T>[d₁,...,dₙ]    B : tensor<T>[d₁,...,dₙ]
              A + B : tensor<T>[d₁,...,dₙ]
 ```
 
-Element-wise operations (`+`, `-`, `*`, `/`, and all pointwise math) require that both operands
-have *identical shapes*. The result has the same shape.
+Element-wise operations (`+`, `-`, `*`, `/`, and all pointwise math) require that both operands have *identical shapes*.
+The result has the same shape.
 
 One constraint is emitted per dimension pair:
 
@@ -402,9 +400,8 @@ f : T → U    xs : tensor<T>[N]
      map(f, xs) : tensor<U>[N]
 ```
 
-`map` applies `f` element-wise to `xs`. The shape of the result is identical to the shape of the
-input — only the element type may change. No shape constraint is emitted; the result shape is
-directly copied from the input shape.
+`map` applies `f` element-wise to `xs`. The shape of the result is identical to the shape of the input — only the
+element type may change. No shape constraint is emitted; the result shape is directly copied from the input shape.
 
 ```
 xs: Shape[N]
@@ -412,8 +409,8 @@ xs: Shape[N]
 result: Shape[N]    (same shape_ref, no new interning needed)
 ```
 
-This is the cleanest shape rule: the compiler literally returns the same `shape_ref` for the result
-as it has for the input.
+This is the cleanest shape rule: the compiler literally returns the same `shape_ref` for the result as it has for the
+input.
 
 ### reduce
 
@@ -423,8 +420,8 @@ f : T → T → T    xs : tensor<T>[N]
       reduce(f, xs) : T
 ```
 
-`reduce` collapses a rank-1 tensor to a scalar by applying a binary operator repeatedly. The result
-has no shape (rank-0). Like `dot`, the result shape is `make_scalar_shape(arena)`.
+`reduce` collapses a rank-1 tensor to a scalar by applying a binary operator repeatedly. The result has no shape
+(rank-0). Like `dot`, the result shape is `make_scalar_shape(arena)`.
 
 ```
 xs: Shape[N]
@@ -438,19 +435,18 @@ result: Shape[]    (rank-0 scalar)
 
 ### NumPy broadcasting rules (as Flux supports them)
 
-Element-wise operations in Flux follow standard NumPy-style broadcasting. Broadcasting lets a
-scalar or lower-rank tensor be *stretched* to match the shape of a higher-rank tensor, without
-actually copying data.
+Element-wise operations in Flux follow standard NumPy-style broadcasting. Broadcasting lets a scalar or lower-rank
+tensor be *stretched* to match the shape of a higher-rank tensor, without actually copying data.
 
-Broadcasting applies when two shapes are *not* identical but are still *compatible*. Compatibility
-is determined by the following algorithm, applied right-to-left on the dimension lists:
+Broadcasting applies when two shapes are *not* identical but are still *compatible*. Compatibility is determined by the
+following algorithm, applied right-to-left on the dimension lists:
 
 1. If ranks differ, prepend `1` to the shorter shape until both have the same rank.
 2. For each dimension pair `(a, b)` (now same rank):
-   - `a == b` → keep that value; dimension is exact match
-   - `a == 1` → result dimension is `b`; this tensor broadcasts along this axis
-   - `b == 1` → result dimension is `a`; that tensor broadcasts along this axis
-   - `a != b` and neither is 1 → ERROR: shapes are incompatible
+    - `a == b` → keep that value; dimension is exact match
+    - `a == 1` → result dimension is `b`; this tensor broadcasts along this axis
+    - `b == 1` → result dimension is `a`; that tensor broadcasts along this axis
+    - `a != b` and neither is 1 → ERROR: shapes are incompatible
 
 ASCII diagram for a non-trivial case:
 
@@ -480,8 +476,8 @@ broadcast_dim(a, b) =
   ERROR   otherwise
 ```
 
-Vakya encodes broadcasting compatibility as a `constraint_kind::broadcastable` constraint emitted
-by `make_broadcastable_constraint(shape_a, shape_b)`. The constraint solver checks the above rules.
+Vakya encodes broadcasting compatibility as a `constraint_kind::broadcastable` constraint emitted by
+`make_broadcastable_constraint(shape_a, shape_b)`. The constraint solver checks the above rules.
 
 ### Shape inference for scalar * tensor (scalar broadcast)
 
@@ -493,8 +489,8 @@ s : f32    A : tensor<f32>[M, N]
       s * A : tensor<f32>[M, N]
 ```
 
-A scalar broadcasts to *any* shape. The constraint is trivially satisfied (rank 0 is compatible
-with any rank by prepending enough 1s). The result shape equals the non-scalar operand's shape.
+A scalar broadcasts to *any* shape. The constraint is trivially satisfied (rank 0 is compatible with any rank by
+prepending enough 1s). The result shape equals the non-scalar operand's shape.
 
 ```flux
 input A : tensor<f32>[4, 4]
@@ -533,9 +529,8 @@ vakya::types::type_ref shape_inferrer::infer_binary_shapes(
 
 ## Rank Polymorphism
 
-Some operations in Flux work regardless of the rank of their arguments. The element-wise ops
-(`+`, `-`, `*`, `/`) are the canonical examples: they work for `[N]`, `[M, N]`, `[M, N, K]`, and
-any other rank equally.
+Some operations in Flux work regardless of the rank of their arguments. The element-wise ops (`+`, `-`, `*`, `/`) are
+the canonical examples: they work for `[N]`, `[M, N]`, `[M, N, K]`, and any other rank equally.
 
 ```
 A : tensor<T>[d₁,...,dₙ]    B : tensor<T>[d₁,...,dₙ]
@@ -543,17 +538,16 @@ A : tensor<T>[d₁,...,dₙ]    B : tensor<T>[d₁,...,dₙ]
         A + B : tensor<T>[d₁,...,dₙ]    ∀n
 ```
 
-The `∀n` is the rank polymorphism: this rule holds for *any* n, not just specific ranks. The
-constraint emitted adapts to the actual rank discovered at inference time.
+The `∀n` is the rank polymorphism: this rule holds for *any* n, not just specific ranks. The constraint emitted adapts
+to the actual rank discovered at inference time.
 
-Vakya tracks rank as a compile-time value inside the shape `type_node`: `n->children.size()` is
-the rank. If at inference time a tensor's rank is not yet determined (e.g., the function takes a
-generic tensor argument), a *rank variable* is used and solved by unification when enough
-information becomes available.
+Vakya tracks rank as a compile-time value inside the shape `type_node`: `n->children.size()` is the rank. If at
+inference time a tensor's rank is not yet determined (e.g., the function takes a generic tensor argument), a *rank
+variable* is used and solved by unification when enough information becomes available.
 
-In practice, almost all Flux programs use concrete ranks (rank 2 for matrices, rank 1 for
-vectors), so rank polymorphism is rarely exercised beyond trivial cases. The mechanism exists
-primarily to support library functions written over arbitrary-rank tensors.
+In practice, almost all Flux programs use concrete ranks (rank 2 for matrices, rank 1 for vectors), so rank polymorphism
+is rarely exercised beyond trivial cases. The mechanism exists primarily to support library functions written over
+arbitrary-rank tensors.
 
 ---
 
@@ -568,11 +562,11 @@ Every function in this section lives in `vakya/types/shape.hpp`.
 intern_shape(type_arena& arena, std::span<const type_ref> dims);
 ```
 
-Creates (or looks up) a shape node in the arena. The `dims` span contains one `type_ref` per
-dimension — each dimension is itself a `type_ref` pointing to a primitive or variable node.
+Creates (or looks up) a shape node in the arena. The `dims` span contains one `type_ref` per dimension — each dimension
+is itself a `type_ref` pointing to a primitive or variable node.
 
-Calling `intern_shape` twice with the same `dims` sequence returns the same `shape_ref` handle.
-This is the hash-consing guarantee: shapes are identified by value, not by allocation site.
+Calling `intern_shape` twice with the same `dims` sequence returns the same `shape_ref` handle. This is the hash-consing
+guarantee: shapes are identified by value, not by allocation site.
 
 ```
 intern_shape(arena, [ref(4), ref(8)])   → shape_ref X
@@ -600,15 +594,14 @@ Returns the rank-0 shape: a `Shape[]` constructor with no children. Scalars resu
 [[nodiscard]] inline std::size_t shape_rank(const type_arena& arena, shape_ref s) noexcept;
 ```
 
-Looks up the shape node in the arena and returns `n->children.size()`. Returns 0 if the ref is not
-a valid shape node (graceful handling of unresolved type variables that haven't been unified to a
-shape yet).
+Looks up the shape node in the arena and returns `n->children.size()`. Returns 0 if the ref is not a valid shape node
+(graceful handling of unresolved type variables that haven't been unified to a shape yet).
 
-| Input | Return value |
-|-------|-------------|
-| `Shape[]` | 0 (scalar) |
-| `Shape[N]` | 1 (vector) |
-| `Shape[M, N]` | 2 (matrix) |
+| Input            | Return value      |
+|------------------|-------------------|
+| `Shape[]`        | 0 (scalar)        |
+| `Shape[N]`       | 1 (vector)        |
+| `Shape[M, N]`    | 2 (matrix)        |
 | `Shape[M, N, K]` | 3 (rank-3 tensor) |
 
 ### `make_matmul_constraints`
@@ -631,8 +624,7 @@ The key function for matrix multiplication shape inference. It:
 4. Computes `out_shape = intern_shape(arena, [lhs_N, rhs_K])`
 5. Returns the constraint vector; caller adds them to the solver batch
 
-Returns an empty constraint vector if either shape is not rank-2 (caller should then emit a shape
-error).
+Returns an empty constraint vector if either shape is not rank-2 (caller should then emit a shape error).
 
 ASCII diagram of what `make_matmul_constraints` does:
 
@@ -650,9 +642,8 @@ lhs_shape: Shape[M, K]       rhs_shape: Shape[K', N]
                    (intern_shape(arena, [M, N]))
 ```
 
-The `type_var_generator gen` parameter is reserved for future use when symbolic dimension variables
-are introduced (e.g., for generic functions over unknown-sized tensors). For concrete shapes it is
-not used.
+The `type_var_generator gen` parameter is reserved for future use when symbolic dimension variables are introduced
+(e.g., for generic functions over unknown-sized tensors). For concrete shapes it is not used.
 
 ### `make_broadcastable_constraint`
 
@@ -660,9 +651,8 @@ not used.
 [[nodiscard]] inline constraint make_broadcastable_constraint(shape_ref a, shape_ref b);
 ```
 
-Returns a single `constraint` with `kind = broadcastable` and operands `[a, b]`. The constraint
-solver checks NumPy broadcasting rules and produces the result shape. Used by the binary op shape
-handler when broadcasting is detected.
+Returns a single `constraint` with `kind = broadcastable` and operands `[a, b]`. The constraint solver checks NumPy
+broadcasting rules and produces the result shape. Used by the binary op shape handler when broadcasting is detected.
 
 ---
 
@@ -996,8 +986,8 @@ E : tensor<f32>[128, 8, 4]
 v : tensor<f64>[128]
 ```
 
-No constraints were left pending: every `same_type` constraint was satisfied immediately by
-hash-consed equality checks (all dimensions are concrete integers, interned once).
+No constraints were left pending: every `same_type` constraint was satisfied immediately by hash-consed equality checks
+(all dimensions are concrete integers, interned once).
 
 ---
 
@@ -1018,8 +1008,8 @@ Shape error at `matmul(A, B)`:
   matmul shape mismatch: dim(A,1)=8 ≠ dim(B,0)=9
 ```
 
-Cause: `lhs_M = ref(8)`, `rhs_M = ref(9)`. These are different interned refs (8 ≠ 9). The
-concrete value check fires and pushes the error before `out_shape` is computed.
+Cause: `lhs_M = ref(8)`, `rhs_M = ref(9)`. These are different interned refs (8 ≠ 9). The concrete value check fires and
+pushes the error before `out_shape` is computed.
 
 ### Error 2 — reshape product mismatch
 
@@ -1049,15 +1039,15 @@ Shape error at `A + B`:
   element-wise op shape mismatch at dim 1: 8≠9
 ```
 
-Cause: `A` has shape `[4, 8]`, `B` has shape `[4, 9]`. `require_same_shape` iterates dimension by
-dimension. Dim 0: `ref(4) == ref(4)` ✓. Dim 1: `ref(8) ≠ ref(9)` → error.
+Cause: `A` has shape `[4, 8]`, `B` has shape `[4, 9]`. `require_same_shape` iterates dimension by dimension. Dim 0:
+`ref(4) == ref(4)` ✓. Dim 1: `ref(8) ≠ ref(9)` → error.
 
 ---
 
 ## `show_types()` Output after Shape Inference
 
-After shape inference completes, the `analysis_store` holds a full `analysis_record` for every
-subexpression. The `show_types()` introspection reads from it:
+After shape inference completes, the `analysis_store` holds a full `analysis_record` for every subexpression. The
+`show_types()` introspection reads from it:
 
 ```flux
 input A : tensor<f32>[4,8]
@@ -1074,9 +1064,9 @@ Expression: matmul(A, B)
   Effects: pure
 ```
 
-The `Type` field comes from HM type inference (Chapter 5). The `Shape` and `Rank` fields are filled
-in by the shape inference pass in this chapter. `Effects: pure` means the expression has no side
-effects — emitted by the effect propagation pass in the same `analyze()` call.
+The `Type` field comes from HM type inference (Chapter 5). The `Shape` and `Rank` fields are filled in by the shape
+inference pass in this chapter. `Effects: pure` means the expression has no side effects — emitted by the effect
+propagation pass in the same `analyze()` call.
 
 Displaying the shape programmatically:
 
@@ -1269,8 +1259,8 @@ Expected output:
 scaled : tensor<f32>[4, 4]   (scalar broadcasts)
 ```
 
-The scalar literal `2.0` has shape `Shape[]` (rank-0). `infer_binary_shapes` detects `lr == 0`,
-returns `rt` (the shape of `A` = `[4, 4]`) directly.
+The scalar literal `2.0` has shape `Shape[]` (rank-0). `infer_binary_shapes` detects `lr == 0`, returns `rt` (the shape
+of `A` = `[4, 4]`) directly.
 
 ---
 
@@ -1351,31 +1341,32 @@ Where shape inference sits in the full Flux compiler:
 
 Summary of all operations and their shape rules:
 
-| Operation | Formal rule | Constraint emitted | Result shape |
-|-----------|------------|-------------------|--------------|
-| `matmul(A[M,K], B[K,N])` | T-MatMul | `same_type(dim(A,1), dim(B,0))` | `[M, N]` |
-| `dot(u[N], v[N])` | T-Dot | `same_type(dim(u,0), dim(v,0))` | `[]` scalar |
-| `transpose(A[M,N])` | T-Transpose | none | `[N, M]` |
-| `reshape(A[d...], [e...])` | T-Reshape | `∏dᵢ = ∏eⱼ` (product) | `[e₁,...,eₘ]` |
-| `A + B` (element-wise) | T-ElemWise | `same_type` per dim | same as `A` |
-| `s * A` (scalar) | T-ScalarBroadcast | none | same as `A` |
-| `map(f, xs[N])` | T-Map | none | same as `xs` |
-| `reduce(f, xs[N])` | T-Reduce | none | `[]` scalar |
+| Operation                  | Formal rule       | Constraint emitted              | Result shape  |
+|----------------------------|-------------------|---------------------------------|---------------|
+| `matmul(A[M,K], B[K,N])`   | T-MatMul          | `same_type(dim(A,1), dim(B,0))` | `[M, N]`      |
+| `dot(u[N], v[N])`          | T-Dot             | `same_type(dim(u,0), dim(v,0))` | `[]` scalar   |
+| `transpose(A[M,N])`        | T-Transpose       | none                            | `[N, M]`      |
+| `reshape(A[d...], [e...])` | T-Reshape         | `∏dᵢ = ∏eⱼ` (product)           | `[e₁,...,eₘ]` |
+| `A + B` (element-wise)     | T-ElemWise        | `same_type` per dim             | same as `A`   |
+| `s * A` (scalar)           | T-ScalarBroadcast | none                            | same as `A`   |
+| `map(f, xs[N])`            | T-Map             | none                            | same as `xs`  |
+| `reduce(f, xs[N])`         | T-Reduce          | none                            | `[]` scalar   |
 
 All constraints flow through `vakya/types/shape.hpp`:
+
 - `intern_shape` — create/lookup shape in type_arena
 - `make_scalar_shape` — rank-0 result
 - `shape_rank` — query number of dimensions
 - `make_matmul_constraints` — emit inner-dim equality, return result shape
 - `make_broadcastable_constraint` — NumPy broadcast compatibility
 
-Shape inference leaves every tensor expression in the AST with a fully concrete `shape_ref`. The
-vakya lowerer in Chapter 7 reads these shape refs to build the `vakya::node` tree with correct
-memory layout information embedded in each type.
+Shape inference leaves every tensor expression in the AST with a fully concrete `shape_ref`. The vakya lowerer in
+Chapter 7 reads these shape refs to build the `vakya::node` tree with correct memory layout information embedded in each
+type.
 
 ---
 
 ## Next
 
-[Chapter 7 → Vakya Lowering](ch07_vakya_lowering.md) — translate the typed, shape-annotated Flux
-AST into `vakya::node` expression trees, with shape information embedded in every tensor type ref.
+[Chapter 7 → Vakya Lowering](ch07_vakya_lowering.md) — translate the typed, shape-annotated Flux AST into `vakya::node`
+expression trees, with shape information embedded in every tensor type ref.

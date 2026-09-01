@@ -1,7 +1,7 @@
 # REPL Framework (`include/languages/repl`) + cranki
 
-A generic, header-only interactive-loop framework for the languages in this tree,
-plus **cranki** — the crank REPL with a Borland-style FTXUI terminal UI.
+A generic, header-only interactive-loop framework for the languages in this tree, plus **cranki** — the crank REPL with
+a Borland-style FTXUI terminal UI.
 
 ## Table of Contents
 
@@ -21,15 +21,15 @@ plus **cranki** — the crank REPL with a Borland-style FTXUI terminal UI.
 
 ## Purpose
 
-crank has a full interpreter facade (`crank::engine`) but no interactive front-end.
-This layer adds one, **without hardwiring to crank**: the loop semantics
-(accumulated definitions, multi-line assembly, history, transcript, `:`-commands)
-are language- and UI-agnostic. A language binds by satisfying a small concept; a
-front-end (headless or FTXUI) drives a `session`.
+crank has a full interpreter facade (`crank::engine`) but no interactive front-end. This layer adds one, **without
+hardwiring to crank**: the loop semantics (accumulated definitions, multi-line assembly, history, transcript, `:`
+-commands)
+are language- and UI-agnostic. A language binds by satisfying a small concept; a front-end (headless or FTXUI) drives a
+`session`.
 
-Design invariants (repo-wide): C++23, header-only, **no virtual, no macros**,
-pay-for-what-you-use (templated engine, monomorphized — no vtable), reuse of the
-existing `crank::engine` pipeline (no re-implementation of parse/analyse/lower/run).
+Design invariants (repo-wide): C++23, header-only, **no virtual, no macros**, pay-for-what-you-use (templated engine,
+monomorphized — no vtable), reuse of the existing `crank::engine` pipeline (no re-implementation of
+parse/analyse/lower/run).
 
 ## Architecture
 
@@ -47,10 +47,10 @@ src/cranki/
   main.cpp                      FTXUI Borland-style TUI over session<crank>
 ```
 
-The core never names crank or FTXUI, and contains no language binding. The crank
-binding lives with its only consumer (the cranki executable) in
-`src/cranki/crank_binding.hpp`; it is crank-aware but has no UI dependency (so it
-compiles headless). FTXUI lives solely in `src/cranki/main.cpp`.
+The core never names crank or FTXUI, and contains no language binding. The crank binding lives with its only consumer
+(the cranki executable) in
+`src/cranki/crank_binding.hpp`; it is crank-aware but has no UI dependency (so it compiles headless). FTXUI lives solely
+in `src/cranki/main.cpp`.
 
 ```
                  drives                 satisfies
@@ -65,12 +65,12 @@ compiles headless). FTXUI lives solely in `src/cranki/main.cpp`.
 
 Concrete named algorithms in the framework, with the header they live in.
 
-| Concern | Algorithm | Where |
-|---|---|---|
+| Concern            | Algorithm                                                                                                                                                                            | Where               |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------|
 | Input completeness | Language-neutral bracket/quote balancer: nesting scan over `() [] {}` skipping `"…"`/`'…'` literals and `//` comments; trailing `\` = continuation → `complete`/`incomplete`/`empty` | `line_classify.hpp` |
-| Command dispatch | Registry map `:name → command_result(args)`, value dispatch via `std::function` (no virtual) | `command.hpp` |
-| Session model | Accumulated-source replay: each accepted input appended, whole buffer re-evaluated | `session<Engine>` |
-| Transcript | Append-only ordered log with bounded retention (ring-drop oldest) | `transcript.hpp` |
+| Command dispatch   | Registry map `:name → command_result(args)`, value dispatch via `std::function` (no virtual)                                                                                         | `command.hpp`       |
+| Session model      | Accumulated-source replay: each accepted input appended, whole buffer re-evaluated                                                                                                   | `session<Engine>`   |
+| Transcript         | Append-only ordered log with bounded retention (ring-drop oldest)                                                                                                                    | `transcript.hpp`    |
 
 ## The `repl_engine` seam
 
@@ -97,16 +97,15 @@ concept repl_engine = requires(E e, const E ce, std::string_view src,
 ```
 
 - `submit(program)` — evaluate a **complete program** and report the outcome.
-- `classify_definition(fragment)` — does this fragment introduce a top-level
-  binding (a `fn`, `type`, `import`, …) the session should persist? Pure/const.
+- `classify_definition(fragment)` — does this fragment introduce a top-level binding (a `fn`, `type`, `import`, …) the
+  session should persist? Pure/const.
 - `set_module_path(dir)` — register a module search directory.
 - `reset()` — drop accumulated engine state (fresh context).
 
 ## `session<Engine>` — accumulated-source model
 
-crank (like most compile-then-run backends) does **not** retain definitions
-between `engine.run()` calls — a `fn` defined on one line is not visible on the
-next. The session bridges this: it keeps the set of successful top-level
+crank (like most compile-then-run backends) does **not** retain definitions between `engine.run()` calls — a `fn`
+defined on one line is not visible on the next. The session bridges this: it keeps the set of successful top-level
 definitions and, per submission, evaluates
 
 ```
@@ -118,12 +117,12 @@ Flow of `submit_buffer(fragment)`:
 1. record in history;
 2. ask the engine `classify_definition(fragment)`;
 3. assemble `program` (all prior defs + fragment) and `engine.submit(program)`;
-4. if the eval succeeded **and** the fragment was a definition, append it to the
-   persisted set (a broken definition never poisons the set);
+4. if the eval succeeded **and** the fragment was a definition, append it to the persisted set (a broken definition
+   never poisons the set);
 5. push a `transcript_entry`.
 
-Multi-line input is handled by `feed_line(line)`, which accumulates physical lines
-until [`classify`](#input-classification) reports the buffer is balanced:
+Multi-line input is handled by `feed_line(line)`, which accumulates physical lines until [
+`classify`](#input-classification) reports the buffer is balanced:
 
 ```cpp
 repl::session<cranki::crank_repl_engine> s;
@@ -132,8 +131,8 @@ s.feed_line("  return 7 }");        // → evaluated
 s.submit_buffer("F()");             // expression, not persisted
 ```
 
-Other members: `history_prev()/history_next()` (recall), `reset(full)` (clear
-defs + engine, optionally scrollback/history/paths), `set_module_path(dir)`,
+Other members: `history_prev()/history_next()` (recall), `reset(full)` (clear defs + engine, optionally
+scrollback/history/paths), `set_module_path(dir)`,
 `transcript()`, `definitions()`, `record_info()/record_command()`.
 
 `submit_status`: `evaluated`, `needs_more`, `command`, `skipped`.
@@ -141,36 +140,34 @@ defs + engine, optionally scrollback/history/paths), `set_module_path(dir)`,
 ## Input classification
 
 `line_classify.hpp` — a pure, language-neutral bracket/quote balancer returning
-`complete` / `incomplete` / `empty`. It tracks nesting of `() [] {}` while ignoring
-brackets inside `"…"` / `'…'` literals and `//` line comments, and treats a
-trailing `\` as an explicit continuation. It does **not** parse the language; a
-language needing exotic quoting supplies its own classifier callable.
+`complete` / `incomplete` / `empty`. It tracks nesting of `() [] {}` while ignoring brackets inside `"…"` / `'…'`
+literals and `//` line comments, and treats a trailing `\` as an explicit continuation. It does **not** parse the
+language; a language needing exotic quoting supplies its own classifier callable.
 
 ## Meta-commands
 
 `command.hpp` — a registry mapping a `:name` to a handler
-`command_result(const std::vector<std::string>& args)`. Dispatch is by value
-(`std::function`), not virtual. Lines whose first non-space char is `:` are
-commands. cranki registers: `:help :reset :clear :defs :modpath <dir> :load <file>
+`command_result(const std::vector<std::string>& args)`. Dispatch is by value (`std::function`), not virtual. Lines whose
+first non-space char is `:` are commands. cranki registers: `:help :reset :clear :defs :modpath <dir> :load <file>
 :quit`. `command_result` carries `{handled, quit, message, is_error}`.
 
 ## Transcript
 
 `transcript.hpp` — append-only ordered log of `transcript_entry`
-(`evaluation` / `command` / `info`) with **bounded retention** (oldest dropped past
-the cap; default 2048 in a session). Pure data — front-ends render it.
+(`evaluation` / `command` / `info`) with **bounded retention** (oldest dropped past the cap; default 2048 in a session).
+Pure data — front-ends render it.
 
 ## Binding a language (crank)
 
 `src/cranki/crank_binding.hpp` provides `cranki::crank_repl_engine`, holding a
 `crank::engine` behind a `unique_ptr` (so `reset()` rebuilds a fresh context):
 
-| concept method            | crank mapping |
-|---------------------------|---------------|
+| concept method            | crank mapping                                                                                                     |
+|---------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `submit(program)`         | `engine.run(program)`; `run_report`/`crank_error` → `eval_outcome`; `value` rendered (int64 → decimal, unit → "") |
-| `classify_definition(in)` | leading token ∈ `{fn,type,struct,enum,import,extern,const,trait,impl,package}` or starts with `@` |
-| `set_module_path(dir)`    | `engine.context().modules().add_path(dir)` |
-| `reset()`                 | rebuild `crank::engine` |
+| `classify_definition(in)` | leading token ∈ `{fn,type,struct,enum,import,extern,const,trait,impl,package}` or starts with `@`                 |
+| `set_module_path(dir)`    | `engine.context().modules().add_path(dir)`                                                                        |
+| `reset()`                 | rebuild `crank::engine`                                                                                           |
 
 A `static_assert(repl_engine<crank_repl_engine>)` guards the contract.
 
@@ -181,8 +178,7 @@ A `static_assert(repl_engine<crank_repl_engine>)` guards the contract.
 
 ## cranki — the FTXUI REPL
 
-`src/cranki/main.cpp` — the Borland/Turbo-Vision-inspired terminal UI, first
-consumer of ftxui in the tree.
+`src/cranki/main.cpp` — the Borland/Turbo-Vision-inspired terminal UI, first consumer of ftxui in the tree.
 
 ```
 ┌ cranki  Modules: /pkgs                         F2 modpath  F3 open ┐
@@ -197,8 +193,8 @@ consumer of ftxui in the tree.
  F1 help · F2 modpath · F3 scripts · Ctrl-L clear · Ctrl-R reset · Esc · Ctrl-Q
 ```
 
-- **Input** (`ftxui::Input`): Enter submits; when a construct spans lines the
-  prompt switches to `...>` (session `needs_more`); Esc cancels a pending buffer.
+- **Input** (`ftxui::Input`): Enter submits; when a construct spans lines the prompt switches to `...>` (session
+  `needs_more`); Esc cancels a pending buffer.
 - **Transcript pane**: colour-coded — results green, errors red, notes yellow.
 - **Compiler-messages pane**: the last submission's diagnostics + timing.
 - **F2**: modal to add a module search directory (`session.set_module_path`).
@@ -206,14 +202,12 @@ consumer of ftxui in the tree.
   evaluates one as a whole program).
 - **Keys**: F1 help, Ctrl-L clear scrollback, Ctrl-R reset session, Ctrl-Q quit.
 
-The UI holds no language logic — every keystroke that evaluates goes through the
-session.
+The UI holds no language logic — every keystroke that evaluates goes through the session.
 
 ## Building & running
 
-FTXUI is already vendored + wired in `CMakeLists.txt`. The `cranki` target builds
-when `src/cranki/main.cpp` exists (guarded), mirroring the crank test target's link
-set plus `ftxui::component` / `ftxui::screen`.
+FTXUI is already vendored + wired in `CMakeLists.txt`. The `cranki` target builds when `src/cranki/main.cpp` exists
+(guarded), mirroring the crank test target's link set plus `ftxui::component` / `ftxui::screen`.
 
 ```sh
 cmake --build <build-dir> --target cranki
@@ -222,13 +216,12 @@ cmake --build <build-dir> --target cranki
 
 ## Testing
 
-`src/tests/test_repl.cpp` (tag `[repl]`) covers the framework **headless and
-engine-agnostic** — it drives the framework with a small `mock_engine` (no crank,
-no FTXUI, no src/cranki coupling): `line_classify` cases, `command_registry`
-dispatch, `transcript` ordering + retention, the `repl_engine` concept, and
-session behaviour (definition-persists / expression-does-not, multi-line assembly,
-`set_module_path` delegation, reset + path re-apply, history). The crank binding
-itself is exercised by building the `cranki` target.
+`src/tests/test_repl.cpp` (tag `[repl]`) covers the framework **headless and engine-agnostic** — it drives the framework
+with a small `mock_engine` (no crank, no FTXUI, no src/cranki coupling): `line_classify` cases, `command_registry`
+dispatch, `transcript` ordering + retention, the `repl_engine` concept, and session behaviour (definition-persists /
+expression-does-not, multi-line assembly,
+`set_module_path` delegation, reset + path re-apply, history). The crank binding itself is exercised by building the
+`cranki` target.
 
 ```sh
 cmake --build <build-dir> --target turbo_twig_tests
@@ -246,5 +239,4 @@ To add e.g. a sutra REPL, mirror cranki:
    `src/sutrai/main.cpp` reusing the same FTXUI shell.
 
 No change to the core is required; `line_classify`, `command`, `transcript`, and
-`session` are already language-neutral. The binding stays with its consumer, never
-inside `include/languages/repl/`.
+`session` are already language-neutral. The binding stays with its consumer, never inside `include/languages/repl/`.

@@ -7,10 +7,10 @@ Flux ships with a set of built-in functions that are always available: `sqrt`, `
 `install_builtin_types()` into every type environment (ch05).
 
 The **standard library** is a second layer: a collection of modules that a Flux program can
-`import`. Each module wraps a group of C++ standard library functions behind Flux-typed bindings.
-The mechanism is the same FFI registry from ch12 — but instead of user code calling
-`ffi_registry::register_fn`, the standard library provides pre-built `install_std_*` functions
-that batch-register entire modules.
+`import`. Each module wraps a group of C++ standard library functions behind Flux-typed bindings. The mechanism is the
+same FFI registry from ch12 — but instead of user code calling
+`ffi_registry::register_fn`, the standard library provides pre-built `install_std_*` functions that batch-register
+entire modules.
 
 ```
 Flux source:   import "std.math"
@@ -104,8 +104,8 @@ void add_flux_fn(flux::ffi_module_builder&       mod,
 
 ### What it provides
 
-All transcendental and arithmetic functions from `<cmath>`, plus constants from `<numbers>`.
-All functions are **pure** (deterministic, no side effects, no allocation).
+All transcendental and arithmetic functions from `<cmath>`, plus constants from `<numbers>`. All functions are **pure**
+(deterministic, no side effects, no allocation).
 
 ```cpp
 // include/languages/flux/stdlib/std_math.hpp
@@ -316,8 +316,8 @@ pure fn normalize(x : f32, y : f32) -> f32 {
 
 ## Module: `std.string`
 
-String operations backed by C++23 `<string>` and `<algorithm>`.
-All functions are pure (value-in, value-out — no mutation).
+String operations backed by C++23 `<string>` and `<algorithm>`. All functions are pure (value-in, value-out — no
+mutation).
 
 ```cpp
 // include/languages/flux/stdlib/std_string.hpp
@@ -535,16 +535,15 @@ pure fn square(x : f32) -> f32 {
 ### Why IO effect propagation works
 
 When `std.io.println_f32` is registered with `effects = kEffectIO`, the `analysis_record`
-for any expression that calls it accumulates that bit. The effect checker in ch05b then
-walks up the call tree — if `report` calls `println_f32`, `report`'s record gets `IO` too.
-The `pure fn` verifier rejects any function with non-zero effects.
+for any expression that calls it accumulates that bit. The effect checker in ch05b then walks up the call tree — if
+`report` calls `println_f32`, `report`'s record gets `IO` too. The `pure fn` verifier rejects any function with non-zero
+effects.
 
 ---
 
 ## Module: `std.tensor`
 
-Neural-network and signal-processing operations on tensors. Backed by C++ with optional
-SIMD dispatch internally.
+Neural-network and signal-processing operations on tensors. Backed by C++ with optional SIMD dispatch internally.
 
 ```cpp
 // include/languages/flux/stdlib/std_tensor.hpp
@@ -762,8 +761,8 @@ let output = std.tensor.softmax(std.tensor.scale(hidden, 0.1))
 
 ## Module: `std.random`
 
-Non-deterministic random number generation via C++ `<random>`.
-Declared **non-deterministic** — cannot be called from `pure fn`.
+Non-deterministic random number generation via C++ `<random>`. Declared **non-deterministic** — cannot be called from
+`pure fn`.
 
 ```cpp
 // include/languages/flux/stdlib/std_random.hpp
@@ -843,8 +842,8 @@ pure fn bad() -> f32 {
 
 ## Module: `std.algo`
 
-Higher-order functional algorithms not covered by the core `map`/`filter`/`reduce` builtins.
-All pure, backed by `<algorithm>` and `<numeric>`.
+Higher-order functional algorithms not covered by the core `map`/`filter`/`reduce` builtins. All pure, backed by
+`<algorithm>` and `<numeric>`.
 
 ```cpp
 // include/languages/flux/stdlib/std_algo.hpp
@@ -1048,8 +1047,8 @@ flux_engine::flux_engine() {
 }
 ```
 
-After this, any Flux program can `import "std.math"`, `import "std.tensor"`, etc. and use
-the full standard library without any additional setup.
+After this, any Flux program can `import "std.math"`, `import "std.tensor"`, etc. and use the full standard library
+without any additional setup.
 
 ---
 
@@ -1089,6 +1088,7 @@ int main() {
 ```
 
 Expected:
+
 ```text
 distance = 5
 angle    = 53.1301 deg
@@ -1129,6 +1129,7 @@ int main() {
 ```
 
 Expected:
+
 ```text
 softmax: [0.0321, 0.0871, 0.2369, 0.6439]
 sum(softmax) = 1.000000
@@ -1168,6 +1169,7 @@ int main() {
 ```
 
 Expected:
+
 ```text
 trimmed  : 'Hello, Flux!'
 upper    : 'HELLO, FLUX!'
@@ -1219,29 +1221,30 @@ error[E0030]: pure fn 'bad' has non-deterministic effect
 
 ## Effect Summary Across All Modules
 
-| Module | Effects | Capabilities | Notes |
-|--------|---------|-------------|-------|
-| `std.math` | none (pure) | CPU | Safe in `pure fn` |
-| `std.string` | none (pure) | CPU | Safe in `pure fn` |
-| `std.tensor` | none (pure) | CPU | Safe in `pure fn` |
-| `std.algo` | none (pure) | CPU | Safe in `pure fn` |
-| `std.io` | IO | CPU | Not allowed in `pure fn` |
-| `std.random` | NonDeterministic | CPU | Not allowed in `pure fn` |
+| Module       | Effects          | Capabilities | Notes                    |
+|--------------|------------------|--------------|--------------------------|
+| `std.math`   | none (pure)      | CPU          | Safe in `pure fn`        |
+| `std.string` | none (pure)      | CPU          | Safe in `pure fn`        |
+| `std.tensor` | none (pure)      | CPU          | Safe in `pure fn`        |
+| `std.algo`   | none (pure)      | CPU          | Safe in `pure fn`        |
+| `std.io`     | IO               | CPU          | Not allowed in `pure fn` |
+| `std.random` | NonDeterministic | CPU          | Not allowed in `pure fn` |
 
 ---
 
 ## What We Have
 
-| Module | C++ header | Functions |
-|--------|-----------|-----------|
-| `std.math` | `<cmath>`, `<numbers>` | 40+ transcendentals, min/max/clamp, gcd/lcm, constants |
-| `std.string` | `<string>`, `<algorithm>` | 18 string ops |
-| `std.io` | `<print>` | 9 print/println variants (IO effect) |
-| `std.tensor` | `<cmath>`, `<algorithm>`, `<numeric>` | 15 activations, normalizations, reductions |
-| `std.random` | `<random>` | 5 random generators (non-deterministic effect) |
-| `std.algo` | `<algorithm>`, `<numeric>` | 9 sorting/scan/linspace ops |
+| Module       | C++ header                            | Functions                                              |
+|--------------|---------------------------------------|--------------------------------------------------------|
+| `std.math`   | `<cmath>`, `<numbers>`                | 40+ transcendentals, min/max/clamp, gcd/lcm, constants |
+| `std.string` | `<string>`, `<algorithm>`             | 18 string ops                                          |
+| `std.io`     | `<print>`                             | 9 print/println variants (IO effect)                   |
+| `std.tensor` | `<cmath>`, `<algorithm>`, `<numeric>` | 15 activations, normalizations, reductions             |
+| `std.random` | `<random>`                            | 5 random generators (non-deterministic effect)         |
+| `std.algo`   | `<algorithm>`, `<numeric>`            | 9 sorting/scan/linspace ops                            |
 
 All modules are:
+
 - **Header-only** — no separate compilation
 - **Zero-cost abstraction** — C++ inline functions with no indirection
 - **Effect-annotated** — each function declares its side effects at registration time
@@ -1249,8 +1252,7 @@ All modules are:
 
 ## Next
 
-[Chapter 12 → FFI](ch_ffi.md) — register your own C++ functions as Flux builtins using the
-same mechanism the standard library uses.
+[Chapter 12 → FFI](ch_ffi.md) — register your own C++ functions as Flux builtins using the same mechanism the standard
+library uses.
 
-[Chapter 13 → Debugging & REPL](ch_debug_repl.md) — run the standard library functions
-interactively in the REPL.
+[Chapter 13 → Debugging & REPL](ch_debug_repl.md) — run the standard library functions interactively in the REPL.

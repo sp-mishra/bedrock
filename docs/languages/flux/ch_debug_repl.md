@@ -18,22 +18,22 @@ Layer 3: Backend bugs
   verify_backends() detects numerical divergence
 ```
 
-**Layer 1 — Source bugs**: wrong type, wrong shape, undefined name, `pure fn` calling
-effectful code. The frontend catches these and emits a diagnostic. User fixes the code.
+**Layer 1 — Source bugs**: wrong type, wrong shape, undefined name, `pure fn` calling effectful code. The frontend
+catches these and emits a diagnostic. User fixes the code.
 
 **Layer 2 — Compiler bugs**: wrong type inferred, shape constraint not generated,
-`vakya_lowerer` emits wrong tag, `structural_hash` diverges between Path A and Path C.
-Needs per-pass inspection: token stream, CST, typed AST, lowered vakya tree.
+`vakya_lowerer` emits wrong tag, `structural_hash` diverges between Path A and Path C. Needs per-pass inspection: token
+stream, CST, typed AST, lowered vakya tree.
 
-**Layer 3 — Backend bugs**: vakya tree is correct but emitted code is wrong.
-SIMD produces different numerical result than CPU reference. Needs cross-backend comparison.
+**Layer 3 — Backend bugs**: vakya tree is correct but emitted code is wrong. SIMD produces different numerical result
+than CPU reference. Needs cross-backend comparison.
 
 ---
 
 ## The Generic REPL Framework
 
-`include/languages/repl/repl.hpp` provides a complete, language-neutral REPL framework.
-Flux binds to it by implementing the `repl::repl_engine` concept.
+`include/languages/repl/repl.hpp` provides a complete, language-neutral REPL framework. Flux binds to it by implementing
+the `repl::repl_engine` concept.
 
 ### Framework components
 
@@ -516,9 +516,8 @@ void flux_repl::run_script(std::string_view source, std::ostream& out) {
 
 ## Multi-Line Input: How `line_classify` Works
 
-`repl::classify()` (from `line_classify.hpp`) determines whether the accumulated buffer is a
-complete construct or needs more input. It counts bracket depth and respects string literals
-and line comments:
+`repl::classify()` (from `line_classify.hpp`) determines whether the accumulated buffer is a complete construct or needs
+more input. It counts bracket depth and respects string literals and line comments:
 
 ```cpp
 // classify() returns:
@@ -527,9 +526,9 @@ and line comments:
 //   input_state::empty      — only whitespace
 ```
 
-Flux uses `--` for comments, but `line_classify` tracks `//` line comments. Since Flux
-comments are `--`, they do NOT interact with the bracket counter — that's fine, they contain
-no brackets. For Flux, provide a thin wrapper that strips `--` comments before classifying:
+Flux uses `--` for comments, but `line_classify` tracks `//` line comments. Since Flux comments are `--`, they do NOT
+interact with the bracket counter — that's fine, they contain no brackets. For Flux, provide a thin wrapper that strips
+`--` comments before classifying:
 
 ```cpp
 // flux_classify: wraps repl::classify, pre-strips -- comments
@@ -600,6 +599,7 @@ diag.render(source_text, std::cerr);
 ```
 
 Output:
+
 ```
 error[E0010]: type mismatch
   --> <repl>:3:9
@@ -614,8 +614,8 @@ error[E0010]: type mismatch
 
 ## Debug Tracing in Each Compiler Pass
 
-When `debug_` is true, `flux_engine::submit` enables tracing at each pass.
-This uses the `debug_context` struct threaded through the pipeline:
+When `debug_` is true, `flux_engine::submit` enables tracing at each pass. This uses the `debug_context` struct threaded
+through the pipeline:
 
 ```cpp
 struct debug_context {
@@ -674,6 +674,7 @@ std::string dump_vakya_str(lithe::shared_expr const& expr, int depth = 0) {
 ```
 
 Example:
+
 ```
 flux> let C = matmul(A, B)
 C : tensor<f32>  shape=[4,16]
@@ -892,11 +893,13 @@ distance(3.0, 4.0)
 ```
 
 Run:
+
 ```bash
 ./flux_repl demo.flux
 ```
 
 Output:
+
 ```text
 9.0 : f32
 5.0 : f32
@@ -917,9 +920,9 @@ Output:
 6. Engine compiles and runs the complete program
 7. Result: `3.0 : f32`
 
-This means every `submit()` call receives a **complete, self-contained program**. The engine
-never needs to maintain incremental state — it always compiles from scratch with the full
-definition context. Simple, correct, and matches how Flux's pipeline works.
+This means every `submit()` call receives a **complete, self-contained program**. The engine never needs to maintain
+incremental state — it always compiles from scratch with the full definition context. Simple, correct, and matches how
+Flux's pipeline works.
 
 ```
 defs_:  ["fn add(x,y){x+y}", "let pi=3.14159"]
@@ -961,6 +964,7 @@ void flux_engine::check_invariant(std::string_view flux_src,
 ```
 
 Usage in tests:
+
 ```cpp
 auto x = lithe::make_symbolic("x");
 auto y = lithe::make_symbolic("y");
@@ -977,33 +981,33 @@ eng.check_invariant("sqrt(x*x + y*y)", edsl);
 
 Each compiler pass emits diagnostics with source locations. The error code scheme:
 
-| Range | Pass | Example |
-|-------|------|---------|
-| E0001–E0009 | Lexer / scanner | E0001: unexpected character |
-| E0010–E0019 | Type mismatch | E0010: cannot unify f32 with bool |
-| E0020–E0029 | Shape mismatch | E0020: matmul inner dim mismatch |
-| E0030–E0039 | Effect violation | E0030: pure fn has IO effect |
-| E0040–E0049 | Name resolution | E0040: undefined name |
-| E0050–E0059 | FFI | E0050: unknown extern fn |
-| E0100+ | Backend | E0100: unsupported capability on backend |
+| Range       | Pass             | Example                                  |
+|-------------|------------------|------------------------------------------|
+| E0001–E0009 | Lexer / scanner  | E0001: unexpected character              |
+| E0010–E0019 | Type mismatch    | E0010: cannot unify f32 with bool        |
+| E0020–E0029 | Shape mismatch   | E0020: matmul inner dim mismatch         |
+| E0030–E0039 | Effect violation | E0030: pure fn has IO effect             |
+| E0040–E0049 | Name resolution  | E0040: undefined name                    |
+| E0050–E0059 | FFI              | E0050: unknown extern fn                 |
+| E0100+      | Backend          | E0100: unsupported capability on backend |
 
 ---
 
 ## What We Have
 
-| Component | Source | Purpose |
-|-----------|--------|---------|
-| `repl::repl_engine` concept | `repl/engine_concept.hpp` | Binding contract |
-| `repl::session<E>` | `repl/session.hpp` | State machine, def accumulation, history |
-| `repl::command_registry` | `repl/command.hpp` | `:` meta-command dispatch |
-| `repl::transcript` | `repl/transcript.hpp` | Scrollback log |
-| `repl::classify()` | `repl/line_classify.hpp` | Multi-line bracket balancing |
-| `repl::eval_outcome` | `repl/engine_concept.hpp` | Per-submit result |
-| `flux::flux_engine` | `flux/repl_engine.hpp` | Flux binding (implements `repl_engine`) |
-| `flux::flux_repl` | `flux/flux_repl.hpp` | Full REPL with commands + I/O loop |
-| `:type/:vakya/:effects/:hash` | `flux_repl.hpp` | Introspection commands |
-| `:debug` | `flux_repl.hpp` | Per-pass trace toggle |
-| `check_invariant()` | `flux/repl_engine.hpp` | Path A == Path C verifier |
+| Component                     | Source                    | Purpose                                  |
+|-------------------------------|---------------------------|------------------------------------------|
+| `repl::repl_engine` concept   | `repl/engine_concept.hpp` | Binding contract                         |
+| `repl::session<E>`            | `repl/session.hpp`        | State machine, def accumulation, history |
+| `repl::command_registry`      | `repl/command.hpp`        | `:` meta-command dispatch                |
+| `repl::transcript`            | `repl/transcript.hpp`     | Scrollback log                           |
+| `repl::classify()`            | `repl/line_classify.hpp`  | Multi-line bracket balancing             |
+| `repl::eval_outcome`          | `repl/engine_concept.hpp` | Per-submit result                        |
+| `flux::flux_engine`           | `flux/repl_engine.hpp`    | Flux binding (implements `repl_engine`)  |
+| `flux::flux_repl`             | `flux/flux_repl.hpp`      | Full REPL with commands + I/O loop       |
+| `:type/:vakya/:effects/:hash` | `flux_repl.hpp`           | Introspection commands                   |
+| `:debug`                      | `flux_repl.hpp`           | Per-pass trace toggle                    |
+| `check_invariant()`           | `flux/repl_engine.hpp`    | Path A == Path C verifier                |
 
 ## Next
 

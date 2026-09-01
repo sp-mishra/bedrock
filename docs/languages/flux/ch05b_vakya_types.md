@@ -2,8 +2,8 @@
 
 ## Why Go Deeper?
 
-Chapter 5 covered basic HM type inference: deduce `f32`, catch `f32 + bool`, infer `∀α. α → α`.
-That is sufficient for *type checking*. But Flux needs more:
+Chapter 5 covered basic HM type inference: deduce `f32`, catch `f32 + bool`, infer `∀α. α → α`. That is sufficient for
+*type checking*. But Flux needs more:
 
 - `requires gpu` — track which operations *need* GPU execution
 - `pure fn` — track which functions have no side effects
@@ -11,8 +11,8 @@ That is sufficient for *type checking*. But Flux needs more:
 - `show_effects()` — report what a computation touches
 - `show_types()` extended — show not just `f32` but full semantic annotations
 
-These require the **V3 constraint reasoning stack** built into Vakya. This chapter explains it and
-shows exactly how Flux uses it.
+These require the **V3 constraint reasoning stack** built into Vakya. This chapter explains it and shows exactly how
+Flux uses it.
 
 ---
 
@@ -60,8 +60,8 @@ Pull everything: `#include <vakya/vakya_types.hpp>`
 
 ## The analysis_record: All Knowledge About One Expression
 
-Every subexpression in the Flux program gets an `analysis_record` — a compact struct that accumulates
-everything the compiler learns:
+Every subexpression in the Flux program gets an `analysis_record` — a compact struct that accumulates everything the
+compiler learns:
 
 ```cpp
 struct analysis_record {
@@ -101,19 +101,19 @@ if (rec) std::println("type: {}", type_name(rec->type));
 
 An **effect** represents a side effect that an expression can perform. Flux tracks:
 
-| Effect | Meaning |
-|--------|---------|
-| `FileSystem` | Reads or writes files |
-| `Memory` | Allocates or frees heap memory |
-| `IO` | Prints to stdout/stderr or reads stdin |
-| `Network` | Makes network calls |
-| `Exception` | Can throw |
+| Effect       | Meaning                                |
+|--------------|----------------------------------------|
+| `FileSystem` | Reads or writes files                  |
+| `Memory`     | Allocates or frees heap memory         |
+| `IO`         | Prints to stdout/stderr or reads stdin |
+| `Network`    | Makes network calls                    |
+| `Exception`  | Can throw                              |
 
 Built-in effects have `stable_id` 1–5. Custom effects extend with `stable_id >= 1000`.
 
 ### Effect masks
 
-Effects are represented as a `uint64_t` bitmask — O(1) union, intersection, and membership:
+Effects are represented as a `uint64_t` bitmask — O (1) union, intersection, and membership:
 
 ```cpp
 auto filesystem_id = 1;   // stable
@@ -146,8 +146,8 @@ pure fn bad(x : f32) -> f32 {
 }
 ```
 
-The effect checker traverses the expression tree, collecting effects from each node, and verifies
-that `pure` declarations have none.
+The effect checker traverses the expression tree, collecting effects from each node, and verifies that `pure`
+declarations have none.
 
 ### Using Vakya's effect system in Flux
 
@@ -199,13 +199,13 @@ print_distance.show_effects()   -- effects: IO
 
 A **capability** is a hardware or runtime resource that an expression requires to execute:
 
-| Capability | Meaning |
-|------------|---------|
-| `Read` | Reads external data |
-| `Write` | Writes external data |
-| `Network` | Network access |
-| `Execute` | Process execution |
-| `Allocate` | Dynamic memory |
+| Capability | Meaning              |
+|------------|----------------------|
+| `Read`     | Reads external data  |
+| `Write`    | Writes external data |
+| `Network`  | Network access       |
+| `Execute`  | Process execution    |
+| `Allocate` | Dynamic memory       |
 
 For Flux's compute focus, we add backend capabilities:
 
@@ -229,8 +229,8 @@ let C = matmul(A, B)
 C.run(gpu)
 ```
 
-The `requires gpu` statement adds `cap_gpu` to the capability mask of `C`. The backend selector
-checks: can the chosen backend satisfy `cap_gpu`? If not, it is an error.
+The `requires gpu` statement adds `cap_gpu` to the capability mask of `C`. The backend selector checks: can the chosen
+backend satisfy `cap_gpu`? If not, it is an error.
 
 ```cpp
 // Check capability in analysis_store
@@ -253,8 +253,7 @@ requires simd
 result.run(simd)
 ```
 
-The inferrer propagates `cap_simd` from the `requires simd` declaration through to all expressions
-that need it.
+The inferrer propagates `cap_simd` from the `requires simd` declaration through to all expressions that need it.
 
 ---
 
@@ -349,8 +348,8 @@ assert(x > 0)       -- runtime assertion (panics if false)
 prove(x*x >= 0)     -- compile-time proof obligation (discharged by SMT)
 ```
 
-`prove` emits a `proof_obligation` to the verification engine. Vakya's `verify.hpp` collects these
-and discharges them through the `smt_backend`:
+`prove` emits a `proof_obligation` to the verification engine. Vakya's `verify.hpp` collects these and discharges them
+through the `smt_backend`:
 
 ```cpp
 // Proof obligations are emitted during analysis
@@ -431,14 +430,14 @@ for (auto const& result : gpu_tensors) {
 
 Available predicates:
 
-| Predicate | Matches |
-|-----------|---------|
-| `type_pred<Ctor>()` | Expressions with type constructor `Ctor` |
-| `typed_pred(type_ref)` | Expressions with exactly this type |
-| `effect_pred(effect_id)` | Expressions with this effect |
-| `capability_pred(cap_id)` | Expressions requiring this capability |
-| `proven_pred()` | Expressions with `proof_status::proven` |
-| `trait_pred(trait_id)` | Expressions satisfying this trait |
+| Predicate                 | Matches                                  |
+|---------------------------|------------------------------------------|
+| `type_pred<Ctor>()`       | Expressions with type constructor `Ctor` |
+| `typed_pred(type_ref)`    | Expressions with exactly this type       |
+| `effect_pred(effect_id)`  | Expressions with this effect             |
+| `capability_pred(cap_id)` | Expressions requiring this capability    |
+| `proven_pred()`           | Expressions with `proof_status::proven`  |
+| `trait_pred(trait_id)`    | Expressions satisfying this trait        |
 
 Composed predicates with `&&`:
 
@@ -452,10 +451,9 @@ auto q = make_query(astore)
 
 ---
 
-## show_types() Deep Output
+## show_types () Deep Output
 
-When `show_types()` is called, it reads from the `analysis_store` and prints the full record, not
-just the bare type:
+When `show_types()` is called, it reads from the `analysis_store` and prints the full record, not just the bare type:
 
 ```flux
 input A : tensor<f32>[4,8]
@@ -561,24 +559,24 @@ C.run(gpu)
 
 ## What We Have
 
-| Feature | Vakya Header | Flux Use |
-|---------|-------------|----------|
-| Type terms + arena | `vakya/types.hpp` | All type inference |
-| Unification | `vakya/unification.hpp` | Equation solving |
-| Constraint routing | `vakya/constraints.hpp` | Capabilities, traits |
-| Effect system | `types/effect.hpp` | `pure fn`, IO tracking |
-| Capability system | `types/capability.hpp` | `requires gpu/simd` |
-| Shape algebra | `types/shape.hpp` | Tensor dimensions |
-| Analysis store | `analysis_store.hpp` | Per-expression records |
-| Analysis orchestration | `analysis.hpp` | `analyze()` one-call |
-| Guarded rewrites | `vakya/rewrite.hpp` | Type-aware optimization |
-| SMT verification | `vakya/smt.hpp` + Tarka | `prove()` |
-| Query engine | `vakya/query.hpp` | `show_types()`, routing |
-| Type normalization | `type_rewrite.hpp` | Simplify type terms |
+| Feature                | Vakya Header            | Flux Use                |
+|------------------------|-------------------------|-------------------------|
+| Type terms + arena     | `vakya/types.hpp`       | All type inference      |
+| Unification            | `vakya/unification.hpp` | Equation solving        |
+| Constraint routing     | `vakya/constraints.hpp` | Capabilities, traits    |
+| Effect system          | `types/effect.hpp`      | `pure fn`, IO tracking  |
+| Capability system      | `types/capability.hpp`  | `requires gpu/simd`     |
+| Shape algebra          | `types/shape.hpp`       | Tensor dimensions       |
+| Analysis store         | `analysis_store.hpp`    | Per-expression records  |
+| Analysis orchestration | `analysis.hpp`          | `analyze()` one-call    |
+| Guarded rewrites       | `vakya/rewrite.hpp`     | Type-aware optimization |
+| SMT verification       | `vakya/smt.hpp` + Tarka | `prove()`               |
+| Query engine           | `vakya/query.hpp`       | `show_types()`, routing |
+| Type normalization     | `type_rewrite.hpp`      | Simplify type terms     |
 
 ---
 
 ## Next
 
-[Chapter 6 → Shape Inference](ch06_shape_inference.md) — deep dive into how tensor shapes are
-inferred, constrained, and verified.
+[Chapter 6 → Shape Inference](ch06_shape_inference.md) — deep dive into how tensor shapes are inferred, constrained, and
+verified.

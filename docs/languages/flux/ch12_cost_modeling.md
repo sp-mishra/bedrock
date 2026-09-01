@@ -5,6 +5,7 @@
 Cost modeling in Flux enables **intelligent backend selection**: CPU (scalar/SIMD) vs. GPU (Metal/Vulkan).
 
 Every Flux program produces a **cost vector** that predicts:
+
 - Compute operations
 - Memory bandwidth
 - Latency (wall-clock time)
@@ -26,6 +27,7 @@ struct cost_vector {
 ```
 
 **Total score** combines all dimensions:
+
 ```
 score = compute_ops + memory_bytes × 0.001 + latency_ms × 100
 ```
@@ -39,6 +41,7 @@ Lower score = better candidate.
 ### 1. Region Analysis
 
 A region is a loop or tensor operation block. Flux analyzes:
+
 - **Loop bounds** (static or symbolic)
 - **Array shapes** (from vakya::types::shape)
 - **Compute intensity** (ops per byte loaded)
@@ -55,12 +58,12 @@ Example: element-wise add
 
 Lithe provides empirical latency models for each backend:
 
-| Backend      | Model                          | Overhead     |
-|--------------|--------------------------------|--------------|
-| CPU Scalar   | ops / 1 GHz                   | 0 ms         |
-| CPU SIMD     | ops / (1 GHz × 8)             | 0 ms         |
-| Metal        | ops / 1 THz (theoretical)     | 0.1 ms (GPU) |
-| Vulkan       | ops / 0.8 THz                 | 0.2 ms       |
+| Backend    | Model                     | Overhead     |
+|------------|---------------------------|--------------|
+| CPU Scalar | ops / 1 GHz               | 0 ms         |
+| CPU SIMD   | ops / (1 GHz × 8)         | 0 ms         |
+| Metal      | ops / 1 THz (theoretical) | 0.1 ms (GPU) |
+| Vulkan     | ops / 0.8 THz             | 0.2 ms       |
 
 Actual latency = model result + backend overhead.
 
@@ -105,11 +108,13 @@ enum class execution_policy {
 ### Threshold Heuristics
 
 Flux does NOT dispatch to GPU for:
+
 - Small data (< 64 KiB)
 - Bandwidth-bound ops with poor GPU utilization
 - Ops requiring host-device transfers
 
 **Transfer cost** is modeled as:
+
 ```
 transfer_ms = bytes_up / upload_bandwidth
             + compute_ms
@@ -224,10 +229,12 @@ Metal GPU:
 ## See It in Action
 
 Architecture example shows cost-driven backend selection:
-[`src/examples/languages/flux/flux_compiler_architecture.hpp`](../../../src/examples/languages/flux/flux_compiler_architecture.hpp)
+[
+`src/examples/languages/flux/flux_compiler_architecture.hpp`](../../../src/examples/languages/flux/flux_compiler_architecture.hpp)
 (Search for `demonstrate_cost_driven_execution()`)
 
 The example compares:
+
 - **Scenario 1**: Small vector (1K elements) → stays on CPU SIMD
 - **Scenario 2**: Large matrix (1M elements) → dispatches to Metal GPU (100× speedup)
 
@@ -268,6 +275,7 @@ Total:             20.1 ms
 ```
 
 Each phase records:
+
 - Backend used
 - Cost score
 - Wall-clock duration

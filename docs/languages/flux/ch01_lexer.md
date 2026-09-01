@@ -2,9 +2,9 @@
 
 ## What Problem Are We Solving?
 
-Before a compiler can reason about `sqrt(x*x + y*y)`, it must turn that string of characters into
-structured data. A **lexer** (also called a scanner or tokeniser) is the first step: it reads raw text
-and emits a flat stream of **tokens** — named, typed chunks of the source.
+Before a compiler can reason about `sqrt(x*x + y*y)`, it must turn that string of characters into structured data. A
+**lexer** (also called a scanner or tokeniser) is the first step: it reads raw text and emits a flat stream of
+**tokens** — named, typed chunks of the source.
 
 ```
 "sqrt(x*x + y*y)"
@@ -18,9 +18,8 @@ The parser in the next chapter sees only this token stream — never the origina
 
 ## The Three Flux Entry Paths
 
-Flux is designed so that the **same compiler pipeline** is reachable from three different starting
-points. All three converge at `vakya::node` — the same expression tree, the same structural hash, the
-same optimizations.
+Flux is designed so that the **same compiler pipeline** is reachable from three different starting points. All three
+converge at `vakya::node` — the same expression tree, the same structural hash, the same optimizations.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -53,20 +52,20 @@ same optimizations.
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-This chapter covers the **lexer** — the character-scanning step inside Paths A and B. Path C has no
-lexer (it builds the tree directly in C++).
+This chapter covers the **lexer** — the character-scanning step inside Paths A and B. Path C has no lexer (it builds the
+tree directly in C++).
 
 ---
 
 ## Path A — Runtime Lexer: Lexy
 
-**Lexy** is a C++23 combinator parsing library. In Flux (and in the Crank language in this codebase),
-lexy handles runtime text: source files read from disk, strings passed to an API, user-typed REPL input.
+**Lexy** is a C++23 combinator parsing library. In Flux (and in the Crank language in this codebase), lexy handles
+runtime text: source files read from disk, strings passed to an API, user-typed REPL input.
 
 ### How lexy's lexer works
 
-In lexy, there is no separate "lexer step" — lexing and parsing are fused into one pass. Token
-recognition is expressed as **rule structs**:
+In lexy, there is no separate "lexer step" — lexing and parsing are fused into one pass. Token recognition is expressed
+as **rule structs**:
 
 ```
 struct rule_struct {
@@ -75,6 +74,7 @@ struct rule_struct {
 ```
 
 The lexy DSL expresses patterns like:
+
 - `dsl::identifier(dsl::ascii::alpha_digit_underscore)` — an identifier
 - `dsl::integer<10>` — a decimal integer
 - `LEXY_LIT("fn")` — the exact string `"fn"`
@@ -82,9 +82,8 @@ The lexy DSL expresses patterns like:
 
 ### Lexy keyword handling
 
-In lexy, keywords are handled by `.reserve()` on the identifier rule. This means: scan an identifier,
-then check if it matches a keyword — and if so, reject it as a plain identifier. This is the
-**scannerless** approach.
+In lexy, keywords are handled by `.reserve()` on the identifier rule. This means: scan an identifier, then check if it
+matches a keyword — and if so, reject it as a plain identifier. This is the **scannerless** approach.
 
 ```cpp
 // lexy keyword reservation pattern (as used in crank/lexer.hpp)
@@ -138,8 +137,8 @@ struct flux_operators {
 
 ### Lexy output: parse_tree
 
-Lexy produces a **`lexy::parse_tree`** — a tree where leaf nodes are tokens. The `build_ast` pass
-(Chapter 3) walks this tree and builds the Flux AST. Lexy retains trivia (whitespace, comments)
+Lexy produces a **`lexy::parse_tree`** — a tree where leaf nodes are tokens. The `build_ast` pass (Chapter 3) walks this
+tree and builds the Flux AST. Lexy retains trivia (whitespace, comments)
 on the tree for source maps.
 
 ```
@@ -163,9 +162,9 @@ lexy parse_tree:
 
 ### Trivia: why whitespace is attached, not emitted
 
-Notice that spaces are not in the token stream. They become **trivia**: metadata attached to the
-*next* meaningful token. This design keeps the parser completely whitespace-oblivious while preserving
-fidelity for error messages, formatters, and LSP features.
+Notice that spaces are not in the token stream. They become **trivia**: metadata attached to the *next* meaningful
+token. This design keeps the parser completely whitespace-oblivious while preserving fidelity for error messages,
+formatters, and LSP features.
 
 ```
 "  let   x  =  10"
@@ -177,21 +176,21 @@ let[trivia="  "]  ident("x")[trivia="   "]  eq[trivia="  "]  int(10)[trivia="  "
 
 ## Path B — Compile-Time Lexer: Samasa
 
-**Samasa** is a PEG scanner + parser framework that can run at **compile time** (`consteval`) as well as
-runtime. When the source string is known at compile time (e.g., a `constexpr` embedded DSL), Samasa
-can produce the token stream and even the parsed CST as a compile-time constant — zero runtime cost.
+**Samasa** is a PEG scanner + parser framework that can run at **compile time** (`consteval`) as well as runtime. When
+the source string is known at compile time (e.g., a `constexpr` embedded DSL), Samasa can produce the token stream and
+even the parsed CST as a compile-time constant — zero runtime cost.
 
 ### How Samasa scanning differs from lexy
 
-| Aspect | Lexy (Path A) | Samasa (Path B) |
-|--------|---------------|-----------------|
-| Execution | Runtime only | Runtime **and** consteval |
-| Lexer model | Fused lex+parse | Separate scanner step |
-| Keyword lookup | `.reserve()` on identifier rule | `keyword_table<TK,N>` (hash-first) |
-| Operator matching | `dsl::op<>` in expression rules | `operator_trie<TK>` (longest-prefix) |
-| Token storage | lexy's internal token buffer | Samasa `token_buffer<TK>` (flat array) |
-| Output | `lexy::parse_tree` (tree) | Samasa green CST (`green_arena<Kind>`) |
-| Consteval support | No | Yes |
+| Aspect            | Lexy (Path A)                   | Samasa (Path B)                        |
+|-------------------|---------------------------------|----------------------------------------|
+| Execution         | Runtime only                    | Runtime **and** consteval              |
+| Lexer model       | Fused lex+parse                 | Separate scanner step                  |
+| Keyword lookup    | `.reserve()` on identifier rule | `keyword_table<TK,N>` (hash-first)     |
+| Operator matching | `dsl::op<>` in expression rules | `operator_trie<TK>` (longest-prefix)   |
+| Token storage     | lexy's internal token buffer    | Samasa `token_buffer<TK>` (flat array) |
+| Output            | `lexy::parse_tree` (tree)       | Samasa green CST (`green_arena<Kind>`) |
+| Consteval support | No                              | Yes                                    |
 
 ### Samasa token kind
 
@@ -261,6 +260,7 @@ enum class token_kind : uint16_t {
 ### Samasa keyword table
 
 `keyword_table<TK, N>` is a perfect-hash map built at compile time. Lookup:
+
 1. Compute FNV-1a hash of the scanned identifier
 2. Check the single entry at `hash % N`
 3. Compare strings (one compare, not a loop)
@@ -305,8 +305,8 @@ constexpr auto flux_keywords() {
 
 ### Samasa operator trie
 
-`operator_trie<TK>` is a **longest-prefix trie** — a tree over the characters of operator strings
-whose leaves are token kinds. Scanning `<=`:
+`operator_trie<TK>` is a **longest-prefix trie** — a tree over the characters of operator strings whose leaves are token
+kinds. Scanning `<=`:
 
 ```
 root
@@ -353,8 +353,8 @@ constexpr auto flux_operators() {
 
 ### Samasa scanner policy
 
-For characters not handled by the keyword table or operator trie (digits, string quotes, comments),
-a custom `scanner_policy<TK>` handles classification:
+For characters not handled by the keyword table or operator trie (digits, string quotes, comments), a custom
+`scanner_policy<TK>` handles classification:
 
 ```cpp
 struct flux_scanner_policy {
@@ -480,8 +480,8 @@ constexpr auto result = scan_consteval<"sqrt(x*x + y*y)">();
 static_assert(result.success, "Flux syntax error at compile time");
 ```
 
-This is useful for embedded DSLs where the source is part of the program binary and should be
-validated by the C++ compiler, not only at runtime.
+This is useful for embedded DSLs where the source is part of the program binary and should be validated by the C++
+compiler, not only at runtime.
 
 ---
 
@@ -499,11 +499,11 @@ auto dist  = lithe::sqrt(x_sym*x_sym + y_sym*y_sym);
 //           ↑ sqrt() wraps in sqrt_tag node
 ```
 
-Each `operator*`, `operator+`, etc. is a template function that calls `lithe::make_node<Tag>(...)`.
-No source text is ever scanned.
+Each `operator*`, `operator+`, etc. is a template function that calls `lithe::make_node<Tag>(...)`. No source text is
+ever scanned.
 
-The `structural_hash` of `dist` is identical to the hash of the same expression compiled from Flux
-source — because both paths produce the same `vakya::node` tree topology.
+The `structural_hash` of `dist` is identical to the hash of the same expression compiled from Flux source — because both
+paths produce the same `vakya::node` tree topology.
 
 ### Vakya tag system
 
@@ -556,15 +556,15 @@ assert(hA == hB);   // runtime source == consteval source
 assert(hA == hC);   // source path == EDSL path
 ```
 
-If these asserts hold, the Flux system is sound: frontend choice is purely a user ergonomics decision,
-not a semantic one.
+If these asserts hold, the Flux system is sound: frontend choice is purely a user ergonomics decision, not a semantic
+one.
 
 ---
 
 ## Algorithm Deep Dive: Maximal Munch
 
-Maximal munch is the universal rule: **a lexer always consumes the longest possible sequence of
-characters that forms a valid token**.
+Maximal munch is the universal rule: **a lexer always consumes the longest possible sequence of characters that forms a
+valid token**.
 
 ### Why it matters: operator ambiguity
 
@@ -586,8 +586,8 @@ Input: ...
 
 ### The operator trie in detail
 
-The Samasa `operator_trie` is a compile-time trie over operator characters. During scanning, the
-cursor advances into the trie simultaneously with the source characters:
+The Samasa `operator_trie` is a compile-time trie over operator characters. During scanning, the cursor advances into
+the trie simultaneously with the source characters:
 
 ```
 State after consuming '<':
@@ -598,14 +598,14 @@ Peek next character:
   'x' → no child   → backtrack to default → token is <
 ```
 
-This is O(L) where L = length of longest operator. No backtracking over the source.
+This is O (L) where L = length of longest operator. No backtracking over the source.
 
 ### The keyword table in detail
 
 The Samasa `keyword_table` avoids the typical "check every keyword" loop. Instead:
 
 1. Scan an identifier by consuming `[a-zA-Z_][a-zA-Z_0-9]*`
-2. Compute FNV-1a hash of the text in O(L) time — same cost as scanning
+2. Compute FNV-1a hash of the text in O (L) time — same cost as scanning
 3. Look up `table[hash % N]` — one array access
 4. Compare the stored keyword string with the scanned text — one string compare
 5. Return keyword kind on match, `identifier` on mismatch
@@ -638,26 +638,27 @@ token<TK>  {
 ```
 
 Key properties:
-- **Random access O(1)** — `buffer[i]` gives the i-th token directly
+
+- **Random access O (1)** — `buffer[i]` gives the i-th token directly
 - **No heap per token** — all tokens in one allocation
 - **Trivia separate** — `trivia_arena` is a parallel array; token records are small
-- **Source slice O(1)** — `src.substr(tok.offset, tok.length)` gives the text
+- **Source slice O (1)** — `src.substr(tok.offset, tok.length)` gives the text
 
 ---
 
 ## Lexy vs Samasa: When to Choose Which
 
-| Scenario | Path | Why |
-|----------|------|-----|
-| Parse user source files at runtime | A (lexy) | Mature library, full UTF-8, ASI, rich error messages |
-| Embedded DSL verified at compile time | B (Samasa consteval) | Zero runtime overhead, compile-time errors |
-| Embed a small expression in C++ code | B or C | C is simplest; B if you want Flux syntax |
-| Large source with complex recovery | A (lexy) | Lexy's error recovery is richer |
-| Unit-test the parser in consteval tests | B (Samasa) | Can static_assert on parse output |
-| Build expression trees programmatically | C (EDSL) | No scanning overhead at all |
+| Scenario                                | Path                 | Why                                                  |
+|-----------------------------------------|----------------------|------------------------------------------------------|
+| Parse user source files at runtime      | A (lexy)             | Mature library, full UTF-8, ASI, rich error messages |
+| Embedded DSL verified at compile time   | B (Samasa consteval) | Zero runtime overhead, compile-time errors           |
+| Embed a small expression in C++ code    | B or C               | C is simplest; B if you want Flux syntax             |
+| Large source with complex recovery      | A (lexy)             | Lexy's error recovery is richer                      |
+| Unit-test the parser in consteval tests | B (Samasa)           | Can static_assert on parse output                    |
+| Build expression trees programmatically | C (EDSL)             | No scanning overhead at all                          |
 
-In practice, a production Flux tool uses **Path A** for user-facing compilation and **Path C** for
-internal use (optimizer algorithms, test fixtures, benchmark harnesses).
+In practice, a production Flux tool uses **Path A** for user-facing compilation and **Path C** for internal use
+(optimizer algorithms, test fixtures, benchmark harnesses).
 
 ---
 
@@ -712,6 +713,7 @@ int main() {
 ```
 
 Expected output:
+
 ```
 Hash A (lexy)   : 0x7f3a9b2c8d41e005
 Hash B (samasa) : 0x7f3a9b2c8d41e005
@@ -735,47 +737,46 @@ Tokens:
 
 ## Summary
 
-| Concept | Detail |
-|---------|--------|
-| Token | (kind, offset, length, trivia) — named chunk of source |
-| Maximal munch | Longest match always wins — implemented by operator trie |
-| Keyword lookup | FNV hash + single compare — O(1), no loop |
-| Trivia | Whitespace/comments attached to next token, not emitted |
-| Path A (lexy) | Runtime: fused lex+parse, lexy parse_tree output |
-| Path B (Samasa) | Runtime + consteval: separate scan, green_arena CST output |
-| Path C (EDSL) | No scanning: `vakya::node` built by C++ operator overloads |
-| Convergence | All paths → same `vakya::node` tree, same `structural_hash` |
+| Concept         | Detail                                                      |
+|-----------------|-------------------------------------------------------------|
+| Token           | (kind, offset, length, trivia) — named chunk of source      |
+| Maximal munch   | Longest match always wins — implemented by operator trie    |
+| Keyword lookup  | FNV hash + single compare — O(1), no loop                   |
+| Trivia          | Whitespace/comments attached to next token, not emitted     |
+| Path A (lexy)   | Runtime: fused lex+parse, lexy parse_tree output            |
+| Path B (Samasa) | Runtime + consteval: separate scan, green_arena CST output  |
+| Path C (EDSL)   | No scanning: `vakya::node` built by C++ operator overloads  |
+| Convergence     | All paths → same `vakya::node` tree, same `structural_hash` |
 
 ---
 
 ## Next
 
-[Chapter 2 → Grammar](ch02_grammar.md) — build the PEG grammar that consumes the token stream (Paths A
-and B) and constructs the Flux CST.
+[Chapter 2 → Grammar](ch02_grammar.md) — build the PEG grammar that consumes the token stream (Paths A and B) and
+constructs the Flux CST.
 
 ---
 
 ## DFA Theory: What a Lexer Is Formally
 
-A lexer is a **Deterministic Finite Automaton** (DFA). Every scanning rule — identifier, integer,
-operator — is a DFA. The scanner runs all relevant DFAs simultaneously and picks the longest match
-(maximal munch). This section makes that formal so the later implementation details have a firm
-theoretical grounding.
+A lexer is a **Deterministic Finite Automaton** (DFA). Every scanning rule — identifier, integer, operator — is a DFA.
+The scanner runs all relevant DFAs simultaneously and picks the longest match (maximal munch). This section makes that
+formal so the later implementation details have a firm theoretical grounding.
 
 ### Formal definition
 
 A DFA is a 5-tuple **(S, Σ, δ, s₀, F)** where:
 
-| Component | Meaning |
-|-----------|---------|
-| **S** | Finite set of states |
-| **Σ** | Input alphabet (for a lexer: bytes or Unicode code points) |
+| Component         | Meaning                                                                         |
+|-------------------|---------------------------------------------------------------------------------|
+| **S**             | Finite set of states                                                            |
+| **Σ**             | Input alphabet (for a lexer: bytes or Unicode code points)                      |
 | **δ : S × Σ → S** | Transition function — given current state and next character, return next state |
-| **s₀ ∈ S** | Start state |
-| **F ⊆ S** | Set of accept states — reaching one means a token has been recognised |
+| **s₀ ∈ S**        | Start state                                                                     |
+| **F ⊆ S**         | Set of accept states — reaching one means a token has been recognised           |
 
-The lexer feeds characters to δ one at a time. When the next character would leave all active DFAs
-(no transition exists), scanning stops and the longest accept state reached so far wins.
+The lexer feeds characters to δ one at a time. When the next character would leave all active DFAs (no transition
+exists), scanning stops and the longest accept state reached so far wins.
 
 ### DFA for `<`, `=`, `<=` in Flux
 
@@ -797,15 +798,14 @@ The lexer feeds characters to δ one at a time. When the next character would le
                    └──other──► ACCEPT(gt)           "consumed >, push back 1 char"
 ```
 
-"Push back 1" means the lookahead character was consumed only to confirm the DFA exits — it is
-returned to the input stream for the *next* token. This is the standard one-character lookahead
-found in every real lexer.
+"Push back 1" means the lookahead character was consumed only to confirm the DFA exits — it is returned to the input
+stream for the *next* token. This is the standard one-character lookahead found in every real lexer.
 
 ### How DFA states map to the Samasa operator trie
 
-The Samasa `operator_trie` is a data structure that directly encodes δ for all operator DFAs
-simultaneously. Each trie **node** is a DFA state. Each **edge** is a character transition. Each
-**leaf** (or node with a stored kind) is an accept state.
+The Samasa `operator_trie` is a data structure that directly encodes δ for all operator DFAs simultaneously. Each trie
+**node** is a DFA state. Each **edge** is a character transition. Each **leaf** (or node with a stored kind) is an
+accept state.
 
 ```
 Trie node for root (= start state s₀):
@@ -821,8 +821,8 @@ Trie node_lt:
   no edge  → use stored kind lt (= ACCEPT(lt), push back)
 ```
 
-There is a 1-to-1 correspondence: every DFA state is a trie node, every DFA transition is a trie
-edge. Building `flux_operators()` at compile time builds all operator DFAs at once.
+There is a 1-to-1 correspondence: every DFA state is a trie node, every DFA transition is a trie edge. Building
+`flux_operators()` at compile time builds all operator DFAs at once.
 
 ### Parallel DFAs and maximal match
 
@@ -841,8 +841,8 @@ The scanner runs three classes of DFA in parallel on each character:
          └─► integer DFA       not digit → reject
 ```
 
-The winner is whichever DFA accepted at the greatest offset. Ties are broken by priority (keywords
-beat identifiers; this is handled by running keyword lookup after the identifier DFA accepts).
+The winner is whichever DFA accepted at the greatest offset. Ties are broken by priority (keywords beat identifiers;
+this is handled by running keyword lookup after the identifier DFA accepts).
 
 ### DFA for Flux numeric literals
 
@@ -876,8 +876,8 @@ The distinguishing character is `'.'`: scanning `3` stays in `int_body` (integer
 transitions to `frac_body` (float). The exponent arm (`3e10`, `1.5e-3`) also produces `float_lit`
 because exponential notation always implies a real number.
 
-This DFA is implemented in `flux_scanner_policy::classify` — compare the `has_dot` flag logic in
-the `classify` method shown earlier in this chapter.
+This DFA is implemented in `flux_scanner_policy::classify` — compare the `has_dot` flag logic in the `classify` method
+shown earlier in this chapter.
 
 ---
 
@@ -885,8 +885,8 @@ the `classify` method shown earlier in this chapter.
 
 > **Copy, paste, compile, run.**
 
-Each step below is a self-contained C++ file. Add `-std=c++23` and link lexy. The expected output is
-shown after each listing.
+Each step below is a self-contained C++ file. Add `-std=c++23` and link lexy. The expected output is shown after each
+listing.
 
 ### Step 1 — Scan a single identifier
 
@@ -1096,8 +1096,8 @@ int main() {
 
 ### Step 4 — What lexy gives you for free: trivia
 
-Lexy attaches whitespace and comments to the *next* meaningful token as **trivia**. The parser never
-sees whitespace directly, but you can inspect it for formatters or error messages.
+Lexy attaches whitespace and comments to the *next* meaningful token as **trivia**. The parser never sees whitespace
+directly, but you can inspect it for formatters or error messages.
 
 ```cpp
 // lexy_step4.cpp — inspect trivia attached to tokens
@@ -1148,13 +1148,13 @@ trivia: "-- compute\n"
 token:  let (kind=kw_let)
 ```
 
-The comment `-- compute` is not lost — it is preserved as trivia on the `let` token. A language
-server or formatter can recover it from the parse tree without a separate comment-scanning pass.
+The comment `-- compute` is not lost — it is preserved as trivia on the `let` token. A language server or formatter can
+recover it from the parse tree without a separate comment-scanning pass.
 
 ### Step 5 — A lexy parse error
 
-Lexy emits structured diagnostics. When the input violates a rule, you get a `lexy::error` with a
-position and message, not a raw exception.
+Lexy emits structured diagnostics. When the input violates a rule, you get a `lexy::error` with a position and message,
+not a raw exception.
 
 ```cpp
 // lexy_step5.cpp — observe lexy's error format on "let 123 = x"
@@ -1199,8 +1199,8 @@ int main() {
 (parse failed — see diagnostic above)
 ```
 
-The diagnostic includes the file/line, a human-readable message, and a caret pointing at the
-offending character — exactly the format expected in a production compiler front-end.
+The diagnostic includes the file/line, a human-readable message, and a caret pointing at the offending character —
+exactly the format expected in a production compiler front-end.
 
 ---
 
@@ -1241,13 +1241,13 @@ int main() {
   offset=  6  length= 1  kind=29  text=)
 ```
 
-Token records are raw integers — offset and length index back into the original source string. No
-heap allocation per token; the entire buffer is one contiguous array.
+Token records are raw integers — offset and length index back into the original source string. No heap allocation per
+token; the entire buffer is one contiguous array.
 
 ### Step 2 — `consteval` scan
 
-When the source is a compile-time string, `scan_consteval` runs the entire scanner at `consteval`.
-A syntax error is a **build error** — it is reported by the compiler, not at runtime.
+When the source is a compile-time string, `scan_consteval` runs the entire scanner at `consteval`. A syntax error is a
+**build error** — it is reported by the compiler, not at runtime.
 
 ```cpp
 // samasa_step2.cpp — compile-time scanning with static_assert
@@ -1273,8 +1273,8 @@ int main() {
 compile-time scan succeeded: 5 tokens
 ```
 
-The source `"x*x + "` would produce a `static_assert` failure at build time with the Flux
-expression shown in the assert message. Embedded DSL mistakes are caught before the binary is linked.
+The source `"x*x + "` would produce a `static_assert` failure at build time with the Flux expression shown in the assert
+message. Embedded DSL mistakes are caught before the binary is linked.
 
 ### Step 3 — Inspect the token buffer
 
@@ -1326,14 +1326,14 @@ offset  length            kind  text
      8       1      identifier  y
 ```
 
-Offsets 3 and 5 are spaces — they are consumed but not stored in the token buffer (they become
-trivia). The gap between offset 2 and 4 (the space after the first `x`) is invisible in the token
-table but can be reconstructed by comparing adjacent offsets.
+Offsets 3 and 5 are spaces — they are consumed but not stored in the token buffer (they become trivia). The gap between
+offset 2 and 4 (the space after the first `x`) is invisible in the token table but can be reconstructed by comparing
+adjacent offsets.
 
 ### Step 4 — Keyword disambiguation: `"letter"` vs `"let"`
 
-The FNV hash of `"letter"` maps to a different slot than `"let"`. Even if they collided, the string
-compare rejects the mismatch. Either way, `"letter"` is always emitted as `identifier`.
+The FNV hash of `"letter"` maps to a different slot than `"let"`. Even if they collided, the string compare rejects the
+mismatch. Either way, `"letter"` is always emitted as `identifier`.
 
 ```cpp
 // samasa_step4.cpp — FNV hash disambiguates "letter" from "let"
@@ -1356,8 +1356,8 @@ let       kind=4   keyword=true
 letter    kind=1   keyword=false
 ```
 
-The `"let"` scan: FNV hash → slot → stored entry is `"let"` → match → `kw_let` (kind 4).
-The `"letter"` scan: FNV hash → different slot → stored entry might be anything → compare fails →
+The `"let"` scan: FNV hash → slot → stored entry is `"let"` → match → `kw_let` (kind 4). The `"letter"` scan: FNV hash →
+different slot → stored entry might be anything → compare fails →
 `identifier` (kind 1). One hash, one compare — no loop either way.
 
 ### Step 5 — Operator trie trace: `"<="` then `"<"`
@@ -1383,17 +1383,19 @@ int main() {
 ```
 
 Trie walk for `"<="`:
+
 - Root: edge `'<'` exists → advance to `node_lt`, consume `<`.
 - `node_lt`: edge `'='` exists → advance to leaf `lt_eq`, consume `=`.
 - Leaf reached → emit token `lt_eq`, length 2.
 
 Trie walk for `"<"` (next character is EOF or space):
+
 - Root: edge `'<'` exists → advance to `node_lt`, consume `<`.
 - `node_lt`: no further edge matches (EOF) → `node_lt` carries default kind `lt`.
 - Emit token `lt`, length 1. No character was pushed back because EOF terminated the walk.
 
-In source text like `"x < y"` the space after `<` terminates the trie walk at `node_lt` exactly the
-same way, so `<` is correctly emitted as a single-character token.
+In source text like `"x < y"` the space after `<` terminates the trie walk at `node_lt` exactly the same way, so `<` is
+correctly emitted as a single-character token.
 
 ---
 
@@ -1401,8 +1403,7 @@ same way, so `<` is correctly emitted as a single-character token.
 
 > **Copy, paste, compile, run.**
 
-Path C builds `vakya::node` trees directly from C++ operator overloads. No source text, no scanner,
-no token buffer.
+Path C builds `vakya::node` trees directly from C++ operator overloads. No source text, no scanner, no token buffer.
 
 ### Step 1 — Build a minimal expression
 
@@ -1429,8 +1430,8 @@ mul(
 ```
 
 `make_symbolic` creates a leaf node tagged `symbolic_tag` with a string label. `operator*` calls
-`lithe::make_node<mul_tag>(x, x)`. The hash is computed bottom-up: leaf hashes are mixed with the
-tag's `stable_id` using FNV-1a, then the children hashes are combined in canonical order.
+`lithe::make_node<mul_tag>(x, x)`. The hash is computed bottom-up: leaf hashes are mixed with the tag's `stable_id`
+using FNV-1a, then the children hashes are combined in canonical order.
 
 ### Step 2 — Build `sqrt(x*x + y*y)`
 
@@ -1465,9 +1466,8 @@ sqrt(
 )
 ```
 
-This hash is identical to the hash produced by Path A (lexy) and Path B (Samasa) for the same
-expression — that is the convergence invariant verified in the complete example at the end of this
-chapter.
+This hash is identical to the hash produced by Path A (lexy) and Path B (Samasa) for the same expression — that is the
+convergence invariant verified in the complete example at the end of this chapter.
 
 ### Step 3 — Commutativity: does `a+b == b+a`?
 
@@ -1495,9 +1495,9 @@ b+a hash: 0x3c8a21f9b04d7e11
 equal:    true
 ```
 
-`add_tag` has `is_commutative = true` in its `tag_descriptor`. When `structural_hash` hashes a
-commutative node, it sorts the children's hashes before mixing — so `hash(a+b) == hash(b+a)`.
-Non-commutative operations (subtraction, division, function calls with ordered arguments) do *not*
+`add_tag` has `is_commutative = true` in its `tag_descriptor`. When `structural_hash` hashes a commutative node, it
+sorts the children's hashes before mixing — so `hash(a+b) == hash(b+a)`. Non-commutative operations (subtraction,
+division, function calls with ordered arguments) do *not*
 sort, so `a-b != b-a` as expected.
 
 This commutative normalization means the optimizer can match `x+1` against a pattern written as
@@ -1505,8 +1505,8 @@ This commutative normalization means the optimizer can match `x+1` against a pat
 
 ### Step 4 — User-defined tag
 
-Tags are just empty structs. Registering a `tag_descriptor` gives the system the metadata it needs
-for hashing, printing, and matching.
+Tags are just empty structs. Registering a `tag_descriptor` gives the system the metadata it needs for hashing,
+printing, and matching.
 
 ```cpp
 // edsl_step4.cpp — define norm2_tag (Euclidean norm squared)

@@ -2,9 +2,8 @@
 
 ## Theory
 
-**Algebraic rewrites** replace expression patterns with equivalent expressions. When combined with
-**e-graphs** (equality saturation), the optimizer can explore an exponential number of equivalent forms
-in polynomial space.
+**Algebraic rewrites** replace expression patterns with equivalent expressions. When combined with **e-graphs**
+(equality saturation), the optimizer can explore an exponential number of equivalent forms in polynomial space.
 
 ### Rewrite Rules
 
@@ -19,8 +18,7 @@ a + b  →  b + a       (commutativity, when beneficial)
 sqrt(x*x + y*y) can be recognized as norm2(x,y)
 ```
 
-Rewrites are **sound**: both sides are semantically equivalent. The optimizer picks whichever form has
-lower cost.
+Rewrites are **sound**: both sides are semantically equivalent. The optimizer picks whichever form has lower cost.
 
 ### Pattern Matching
 
@@ -50,8 +48,8 @@ auto square_rule = rule("square",
 
 ### E-Graphs
 
-An **e-graph** (equality graph) stores equivalence classes of expressions. Adding a rewrite does not
-destroy the original expression — it adds the rewritten form to the same equivalence class.
+An **e-graph** (equality graph) stores equivalence classes of expressions. Adding a rewrite does not destroy the
+original expression — it adds the rewritten form to the same equivalence class.
 
 ```
 e-class 1: { x + 0,  x }
@@ -203,9 +201,8 @@ neg  : 1
 square : 3  (fused squaring, cheaper than mul + mul)
 ```
 
-After saturation, `x*x` and `square(x)` are in the same e-class. The extractor picks `square(x)` if
-its cost (3) < `mul(x,x)` cost (2+1+1=4 roughly, depending on x's cost). The cost model makes this
-decision automatically.
+After saturation, `x*x` and `square(x)` are in the same e-class. The extractor picks `square(x)` if its cost (3) <
+`mul(x,x)` cost (2+1+1=4 roughly, depending on x's cost). The cost model makes this decision automatically.
 
 ---
 
@@ -288,6 +285,7 @@ int main() {
 ```
 
 Expected output:
+
 ```
 Original:
 sqrt
@@ -312,5 +310,5 @@ norm2(x, y)    -- if norm2 is cheaper in the cost model
 
 ## Next
 
-[Chapter 9 → IR Generation & Backends](ch09_ir.md) — lower the optimized Vakya tree into Lithe MIR
-and emit CPU/SIMD/GPU code.
+[Chapter 9 → IR Generation & Backends](ch09_ir.md) — lower the optimized Vakya tree into Lithe MIR and emit CPU/SIMD/GPU
+code.

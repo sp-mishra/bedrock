@@ -2,10 +2,9 @@
 
 ## What Problem Are We Solving?
 
-The lexer from Chapter 1 gives us a flat token stream — a sequence of typed, positioned chunks with no
-relationships between them. The **parser** must find the structure: which tokens group together into
-expressions, which expressions group into statements, which statements compose into functions. That
-structure is the **Concrete Syntax Tree (CST)**.
+The lexer from Chapter 1 gives us a flat token stream — a sequence of typed, positioned chunks with no relationships
+between them. The **parser** must find the structure: which tokens group together into expressions, which expressions
+group into statements, which statements compose into functions. That structure is the **Concrete Syntax Tree (CST)**.
 
 ```
 Tokens: IDENT("sqrt") LPAREN IDENT("x") STAR IDENT("x") PLUS IDENT("y") STAR IDENT("y") RPAREN
@@ -23,15 +22,13 @@ CST:   call_expr
                            +-- identifier "y"
 ```
 
-The CST is not simplified. It preserves every token including parentheses, commas, and keywords. A
-later pass (Chapter 3) lowers it to a typed AST. This two-phase approach makes the parser itself
-simpler and composable, and gives the diagnostic layer access to exact source positions for every
-token in the tree.
+The CST is not simplified. It preserves every token including parentheses, commas, and keywords. A later pass (Chapter
+3) lowers it to a typed AST. This two-phase approach makes the parser itself simpler and composable, and gives the
+diagnostic layer access to exact source positions for every token in the tree.
 
 ### The Three Entry Paths
 
-As Chapter 1 established, Flux has three entry paths that all converge at `vakya::node`. Parsing is
-used by two of them:
+As Chapter 1 established, Flux has three entry paths that all converge at `vakya::node`. Parsing is used by two of them:
 
 ```
 Path A — Runtime text (lexy)
@@ -51,24 +48,23 @@ Path C — C++ EDSL (lithe direct)
     --> vakya::node directly (no parsing)
 ```
 
-This chapter covers the **Samasa parser** used in both Path A (runtime parse) and Path B (consteval
-parse). Path A feeds the same grammar but runs at runtime with full diagnostics. Path B runs the
-identical grammar at compile time via `consteval`, so parse errors become compiler errors with a
+This chapter covers the **Samasa parser** used in both Path A (runtime parse) and Path B (consteval parse). Path A feeds
+the same grammar but runs at runtime with full diagnostics. Path B runs the identical grammar at compile time via
+`consteval`, so parse errors become compiler errors with a
 `static_assert`.
 
 ---
 
 ## Grammar Formalism: Three Competing Approaches
 
-Before writing any Flux parser code, it helps to understand the design space. Three formalisms exist
-for expressing context-free syntax: classical CFG (used by yacc/bison), PEG (used by Samasa), and
-hand-written recursive descent. They make different tradeoffs.
+Before writing any Flux parser code, it helps to understand the design space. Three formalisms exist for expressing
+context-free syntax: classical CFG (used by yacc/bison), PEG (used by Samasa), and hand-written recursive descent. They
+make different tradeoffs.
 
 ### Context-Free Grammars and LALR
 
-A **Context-Free Grammar** is a 4-tuple G = (N, Σ, P, S) where N is a set of nonterminals, Σ is the
-terminal alphabet (tokens), P is a set of production rules, and S is the start symbol. Production
-rules are written in BNF:
+A **Context-Free Grammar** is a 4-tuple G = (N, Σ, P, S) where N is a set of nonterminals, Σ is the terminal alphabet
+(tokens), P is a set of production rules, and S is the start symbol. Production rules are written in BNF:
 
 ```
 expr   ::= expr '+' term | term
@@ -76,9 +72,9 @@ term   ::= term '*' factor | factor
 factor ::= '(' expr ')' | NUMBER
 ```
 
-**LALR(1) parsers** (yacc, bison, menhir) build a finite-state machine from the grammar at compile
-time. The parser is a table: given the current state and the lookahead token, look up either SHIFT
-(push the token and go to a new state) or REDUCE (apply a production rule and pop states).
+**LALR (1) parsers** (yacc, bison, menhir) build a finite-state machine from the grammar at compile time. The parser is
+a table: given the current state and the lookahead token, look up either SHIFT (push the token and go to a new state) or
+REDUCE (apply a production rule and pop states).
 
 The problem is ambiguity. Consider the classic dangling-else:
 
@@ -87,8 +83,7 @@ if_stmt ::= 'if' expr 'then' stmt
           | 'if' expr 'then' stmt 'else' stmt
 ```
 
-After parsing `if E then S`, the next token is `else`. The LALR automaton is in a state where two
-actions are valid:
+After parsing `if E then S`, the next token is `else`. The LALR automaton is in a state where two actions are valid:
 
 ```
 Dangling else: if E then S else S
@@ -103,17 +98,16 @@ Dangling else: if E then S else S
   Bison will warn; menhir will refuse to compile without an explicit %prec.
 ```
 
-LALR grammars also require separate lexer and parser passes, which causes the classic
-lexer-hack problem: some tokens need parser context to be recognised correctly (C's typedef
-names, for example). LALR is mature and fast but grammar conflicts are a constant source of
-maintenance burden.
+LALR grammars also require separate lexer and parser passes, which causes the classic lexer-hack problem: some tokens
+need parser context to be recognised correctly (C's typedef names, for example). LALR is mature and fast but grammar
+conflicts are a constant source of maintenance burden.
 
 ### PEG Grammars — No Ambiguity by Design
 
-A **Parsing Expression Grammar** replaces the nondeterministic union `A | B` with an ordered
-choice `A / B`. The operator `/` means: try A; if A succeeds, commit (do not try B); only try
-B if A fails. This makes PEG grammars deterministic by construction. There are no shift/reduce
-conflicts because there is no table — the grammar is directly interpreted.
+A **Parsing Expression Grammar** replaces the nondeterministic union `A | B` with an ordered choice `A / B`. The
+operator `/` means: try A; if A succeeds, commit (do not try B); only try B if A fails. This makes PEG grammars
+deterministic by construction. There are no shift/reduce conflicts because there is no table — the grammar is directly
+interpreted.
 
 PEG operators:
 
@@ -137,9 +131,9 @@ if_expr := 'if' expr block ('else' block)?
   no conflict, no grammar hack, no table entry, no warning.
 ```
 
-PEG grammars can express all LALR(1) grammars plus many LL(k) grammars. They cannot directly
-express left-recursive rules (the PEG sequence `expr := expr '+' term` would loop), but Pratt
-parsing (covered below) handles operator precedence correctly without left recursion.
+PEG grammars can express all LALR (1) grammars plus many LL (k) grammars. They cannot directly express left-recursive
+rules (the PEG sequence `expr := expr '+' term` would loop), but Pratt parsing (covered below) handles operator
+precedence correctly without left recursion.
 
 ### Samasa's `cut` Combinator
 
@@ -150,8 +144,8 @@ rule_let_decl := seq(kw_let, identifier, eq, expression)
 ```
 
 If the source is `let 123 = x`, a pure PEG parser sees `kw_let` match, then fails on `identifier`
-(got `integer_literal`). It backtracks and tries the next alternative. The error message reports
-the *outermost* failure location, not the point of confusion.
+(got `integer_literal`). It backtracks and tries the next alternative. The error message reports the *outermost* failure
+location, not the point of confusion.
 
 `cut` solves this:
 
@@ -169,28 +163,27 @@ Once the parser has committed past `cut`, the diagnostic is precise:
 error at 4: expected identifier, got integer_literal '123'
 ```
 
-Without `cut`, the parser would backtrack to the top-level `choice` between `let_decl`, `fn_decl`,
-and `input_decl`, and produce a message like "expected declaration", which is useless.
+Without `cut`, the parser would backtrack to the top-level `choice` between `let_decl`, `fn_decl`, and `input_decl`, and
+produce a message like "expected declaration", which is useless.
 
 ### Recursive Descent
 
-Hand-written **recursive descent** is simply a manual PEG implementation. Each grammar rule becomes
-a function that returns success/failure and a node. Recursive descent is easy to debug and profile,
-but writing it by hand is verbose and the combinator structure is buried in control flow.
+Hand-written **recursive descent** is simply a manual PEG implementation. Each grammar rule becomes a function that
+returns success/failure and a node. Recursive descent is easy to debug and profile, but writing it by hand is verbose
+and the combinator structure is buried in control flow.
 
-Samasa **generates** recursive descent from the grammar type: each `rule_*` struct is compiled into
-an inlined parse function. The grammar type is the source of truth; the generated code is what runs.
-This gives the readability of hand-written recursive descent with the correctness guarantees of a
-formal grammar definition.
+Samasa **generates** recursive descent from the grammar type: each `rule_*` struct is compiled into an inlined parse
+function. The grammar type is the source of truth; the generated code is what runs. This gives the readability of
+hand-written recursive descent with the correctness guarantees of a formal grammar definition.
 
 ---
 
 ## Pratt Parsing: Expression Precedence
 
 This is the most important section of the chapter. Operator expressions — `x + y * z`, `-x^2`,
-`a == b and c != d` — appear in almost every Flux program. Getting their structure right (which
-operator binds more tightly, which is left- vs right-associative) requires a parsing strategy that
-handles precedence without encoding it as grammar rewrites.
+`a == b and c != d` — appear in almost every Flux program. Getting their structure right (which operator binds more
+tightly, which is left- vs right-associative) requires a parsing strategy that handles precedence without encoding it as
+grammar rewrites.
 
 ### Why Naive Recursive Descent Fails for Expressions
 
@@ -201,8 +194,8 @@ expr := expr '+' term | term    -- LEFT RECURSIVE: would loop forever!
 term := term '*' factor | factor
 ```
 
-A recursive descent parser that naively calls `parse_expr()` inside `parse_expr()` as the first
-thing it does will recurse infinitely before consuming a single token.
+A recursive descent parser that naively calls `parse_expr()` inside `parse_expr()` as the first thing it does will
+recurse infinitely before consuming a single token.
 
 The classic fix is to stratify the grammar by precedence level:
 
@@ -213,23 +206,21 @@ power    := primary ('^' power)?   -- right-associative via self-tail
 primary  := NUMBER | '(' expr ')'
 ```
 
-This works, but adding a new operator at a new precedence level requires inserting a new function
-in the chain. Adding `and` and `or` requires two more levels. The grammar becomes a ladder of
-single-purpose rules, and every operator must know its exact position in the ladder at the time
-the grammar is written. Pratt parsing eliminates this ladder entirely.
+This works, but adding a new operator at a new precedence level requires inserting a new function in the chain. Adding
+`and` and `or` requires two more levels. The grammar becomes a ladder of single-purpose rules, and every operator must
+know its exact position in the ladder at the time the grammar is written. Pratt parsing eliminates this ladder entirely.
 
 ### Pratt's Insight: Binding Power
 
-**Binding power** (bp) is a number associated with an operator that encodes how tightly it holds
-onto its operands. Each infix operator has two binding powers:
+**Binding power** (bp) is a number associated with an operator that encodes how tightly it holds onto its operands. Each
+infix operator has two binding powers:
 
 - `left_bp` — how hard it pulls on the expression to its left
 - `right_bp` — how hard it pulls on the expression to its right
 
-For left-associative operators, `right_bp = left_bp + 1`. The asymmetry ensures that a second
-occurrence of the same operator attaches to the right, not the left (which would create left
-recursion). For right-associative operators, `right_bp = left_bp` — identical binding power
-forces the recursion to go rightward.
+For left-associative operators, `right_bp = left_bp + 1`. The asymmetry ensures that a second occurrence of the same
+operator attaches to the right, not the left (which would create left recursion). For right-associative operators,
+`right_bp = left_bp` — identical binding power forces the recursion to go rightward.
 
 Flux operator table:
 
@@ -263,9 +254,9 @@ parse_expr(min_bp = 0):
   return lhs
 ```
 
-The key insight: `min_bp` is the "minimum binding power that is allowed to grab my left side". An
-operator only gets to consume `lhs` if its `left_bp` is at least `min_bp`. When we recurse for the
-right side, we pass `right_bp(op)` as the new minimum, so only operators that bind *more tightly*
+The key insight: `min_bp` is the "minimum binding power that is allowed to grab my left side". An operator only gets to
+consume `lhs` if its `left_bp` is at least `min_bp`. When we recurse for the right side, we pass `right_bp(op)` as the
+new minimum, so only operators that bind *more tightly*
 than `op` can grab tokens to the right.
 
 ### Trace: `x + y * z`
@@ -318,14 +309,14 @@ parse_expr(min_bp=0):
 ```
 
 Result: `2^(3^4)` — correct right-associativity. The trick is that for right-associative operators,
-`right_bp == left_bp`, so the recursive call can still see another `^` and consume it. For
-left-associative operators, `right_bp = left_bp + 1` means the recursive call will *not* consume
-another operator at the same level — forcing left grouping.
+`right_bp == left_bp`, so the recursive call can still see another `^` and consume it. For left-associative operators,
+`right_bp = left_bp + 1` means the recursive call will *not* consume another operator at the same level — forcing left
+grouping.
 
 ### Trace: `-x * y` (prefix unary)
 
-Prefix operators are handled in `parse_primary`, not in the main loop. When `parse_primary` sees
-a token that acts as a prefix operator, it reads the operator, then calls `parse_expr(right_bp)`
+Prefix operators are handled in `parse_primary`, not in the main loop. When `parse_primary` sees a token that acts as a
+prefix operator, it reads the operator, then calls `parse_expr(right_bp)`
 with the unary operator's right binding power:
 
 ```
@@ -348,14 +339,14 @@ parse_expr(min_bp=0):
   return binary_expr(*, unary_expr(neg, x), y)
 ```
 
-Result: `((-x) * y)` — correct. Unary minus binds tighter than `*` for its operand (`65 > 60`),
-so `*` cannot steal `x` away from `neg`. But the overall `*` expression still forms correctly
-because `left_bp(*) = 60` passes the outer `min_bp = 0`.
+Result: `((-x) * y)` — correct. Unary minus binds tighter than `*` for its operand (`65 > 60`), so `*` cannot steal `x`
+away from `neg`. But the overall `*` expression still forms correctly because `left_bp(*) = 60` passes the outer
+`min_bp = 0`.
 
 ### Postfix and Method Calls
 
-The `.` operator for method calls is postfix. When the main loop peeks at `.`, it consumes the dot,
-reads the method name and argument list, and wraps the current `lhs` in a `method_call_expr`:
+The `.` operator for method calls is postfix. When the main loop peeks at `.`, it consumes the dot, reads the method
+name and argument list, and wraps the current `lhs` in a `method_call_expr`:
 
 ```
 parse_expr(min_bp=0):
@@ -370,8 +361,8 @@ parse_expr(min_bp=0):
   return method_call_expr(...)
 ```
 
-The `.` operator has `left_bp = 80`, the highest in Flux, so method calls bind more tightly than
-any arithmetic. `a + b.f()` is `a + (b.f())`, not `(a + b).f()`.
+The `.` operator has `left_bp = 80`, the highest in Flux, so method calls bind more tightly than any arithmetic.
+`a + b.f()` is `a + (b.f())`, not `(a + b).f()`.
 
 ---
 
@@ -399,10 +390,10 @@ recover_with<P, R>     on failure in P, apply recovery strategy R
 skip_until_sync<...>   skip tokens until one of the sync tokens is seen
 ```
 
-The most important design note: `rule_ref<R>{}` is how mutually recursive rules refer to each
-other. Without it, `rule_expression` would need `rule_primary` to be complete before it can be
-declared, and `rule_primary` needs `rule_expression` for parenthesised sub-expressions. The
-indirection via `rule_ref` breaks the cycle by deferring resolution to instantiation time.
+The most important design note: `rule_ref<R>{}` is how mutually recursive rules refer to each other. Without it,
+`rule_expression` would need `rule_primary` to be complete before it can be declared, and `rule_primary` needs
+`rule_expression` for parenthesised sub-expressions. The indirection via `rule_ref` breaks the cycle by deferring
+resolution to instantiation time.
 
 ### `tok<TK>::of(kind)` versus `tok<TK>::not_of(kind)`
 
@@ -414,8 +405,8 @@ tok<TK>::of(TK::identifier)   // match any identifier token
 tok<TK>::not_of(TK::rbrace)   // match any token except '}'
 ```
 
-The type parameter `TK` is always `token_kind` (aliased as `TK` inside the grammar namespace).
-This is verbose but unambiguous: every token reference in the grammar is fully qualified.
+The type parameter `TK` is always `token_kind` (aliased as `TK` inside the grammar namespace). This is verbose but
+unambiguous: every token reference in the grammar is fully qualified.
 
 ### Annotated Grammar Rules
 
@@ -584,9 +575,9 @@ struct rule_expression {
 };
 ```
 
-The Pratt engine is provided by Samasa. `flux_op_table()` is a constexpr function that returns
-the operator table (all `infix`, `prefix`, and `postfix` entries). `rule_primary` is the rule for
-atoms — identifiers, literals, parenthesised expressions, `if` expressions, lambdas.
+The Pratt engine is provided by Samasa. `flux_op_table()` is a constexpr function that returns the operator table (all
+`infix`, `prefix`, and `postfix` entries). `rule_primary` is the rule for atoms — identifiers, literals, parenthesised
+expressions, `if` expressions, lambdas.
 
 **`rule_program`** — the root rule:
 
@@ -614,16 +605,15 @@ struct rule_program {
 
 ## The Green Tree: CST Data Structure
 
-Samasa's output is a **green tree** — a flat, immutable, index-based arena of CST nodes. The term
-comes from the Roslyn compiler (C#) where the green tree is the source-faithful layer that never
-loses a token.
+Samasa's output is a **green tree** — a flat, immutable, index-based arena of CST nodes. The term comes from the Roslyn
+compiler (C#) where the green tree is the source-faithful layer that never loses a token.
 
 ### Why a Green Tree?
 
-A traditional AST allocates one heap object per node. For a program with thousands of expressions,
-that is thousands of separate allocations, each with its own pointer header, poor cache locality,
-and individual destructor calls. A green tree uses a single contiguous arena: all nodes are stored
-as flat entries in a `std::vector`-like structure, referenced by integer index.
+A traditional AST allocates one heap object per node. For a program with thousands of expressions, that is thousands of
+separate allocations, each with its own pointer header, poor cache locality, and individual destructor calls. A green
+tree uses a single contiguous arena: all nodes are stored as flat entries in a `std::vector`-like structure, referenced
+by integer index.
 
 Properties:
 
@@ -677,17 +667,16 @@ void walk(green_arena const& a, green_node_idx root) {
 
 ### Trivia
 
-The green tree preserves **trivia** — whitespace and comments — as child nodes of the surrounding
-tokens. This is what makes the CST "source faithful": given the green tree, you can reconstruct the
-original source exactly. The AST (Chapter 3) strips trivia; it only needs the semantic structure.
+The green tree preserves **trivia** — whitespace and comments — as child nodes of the surrounding tokens. This is what
+makes the CST "source faithful": given the green tree, you can reconstruct the original source exactly. The AST (Chapter
+3) strips trivia; it only needs the semantic structure.
 
 ---
 
 ## Error Recovery
 
-A parser that stops at the first error is useless for development. Real compilers report as many
-errors as possible in a single pass. This requires **error recovery**: when parsing fails, skip
-forward to a known-good position and resume.
+A parser that stops at the first error is useless for development. Real compilers report as many errors as possible in a
+single pass. This requires **error recovery**: when parsing fails, skip forward to a known-good position and resume.
 
 ### Synchronisation Points
 
@@ -698,9 +687,8 @@ is found — a token that is very likely to start or end a syntactic unit. For F
 Synchronisation tokens: '{', '}', ';', 'let', 'fn', 'input'
 ```
 
-These are chosen because they are rare inside expressions and almost always appear at statement or
-block boundaries. After skipping to a sync token, the parser has a good chance of re-aligning with
-the structure of the remaining source.
+These are chosen because they are rare inside expressions and almost always appear at statement or block boundaries.
+After skipping to a sync token, the parser has a good chance of re-aligning with the structure of the remaining source.
 
 ### `recover_with` in Samasa
 
@@ -747,9 +735,8 @@ program
 ```
 
 Two diagnostics are emitted, one for each let_decl with an error. The program CST contains an
-`error_node` placeholder where the bad statement was. Downstream passes (Chapter 3 AST builder,
-Chapter 4 name resolution) check for `error_node` children and skip them, so errors do not
-cascade into the semantic analysis.
+`error_node` placeholder where the bad statement was. Downstream passes (Chapter 3 AST builder, Chapter 4 name
+resolution) check for `error_node` children and skip them, so errors do not cascade into the semantic analysis.
 
 ### `cut` + Recovery Interaction
 
@@ -760,13 +747,12 @@ rule_let_decl := seq(kw_let, cut, identifier, eq, expression)
 ```
 
 The sequence `let 123 = x` fires `cut` after `kw_let`. The failure on `identifier` (got
-`integer_literal`) triggers recovery immediately — no backtracking to try `rule_fn_decl`. The
-recovery skips to the next sync token and records a precise error at the failing position.
+`integer_literal`) triggers recovery immediately — no backtracking to try `rule_fn_decl`. The recovery skips to the next
+sync token and records a precise error at the failing position.
 
 Without `cut`, the parser would backtrack to the top `choice` in `rule_safe_statement` and try
 `rule_fn_decl` (which also fails, at position 0 since there is no `fn`), then `rule_expression`
-(which would parse `let` as an identifier — wrong). The first error message would be wrong and
-potentially misleading.
+(which would parse `let` as an identifier — wrong). The first error message would be wrong and potentially misleading.
 
 ---
 
@@ -881,10 +867,9 @@ let_decl [  0.. 30] 'let distance = sqrt(x*x + y*y)'
           identifier [ 28.. 29] 'y'
 ```
 
-Notice that the `+` and `*` operators are represented by the parent `binary_expr` node, not as
-separate leaf nodes. The operator token kind is stored in the `binary_expr`'s own metadata field,
-recoverable as `node.op_kind()`. This keeps the tree compact — operators are attributes of their
-parent expression node rather than separate structural children.
+Notice that the `+` and `*` operators are represented by the parent `binary_expr` node, not as separate leaf nodes. The
+operator token kind is stored in the `binary_expr`'s own metadata field, recoverable as `node.op_kind()`. This keeps the
+tree compact — operators are attributes of their parent expression node rather than separate structural children.
 
 ### Try It 2 — Intentional Parse Error
 
@@ -911,9 +896,8 @@ success: false
 error at 4: expected identifier, got integer_literal '123'
 ```
 
-The error offset is 4 — the character position of `123` in `"let 123 = x"`. The message names
-both what was expected (`identifier`) and what was found (`integer_literal '123'`). This is the
-diagnostic quality that `cut` enables.
+The error offset is 4 — the character position of `123` in `"let 123 = x"`. The message names both what was expected
+(`identifier`) and what was found (`integer_literal '123'`). This is the diagnostic quality that `cut` enables.
 
 ### Try It 3 — `consteval` Grammar Check (Path B)
 
@@ -935,8 +919,8 @@ int main() {
 }
 ```
 
-If the string is changed to `"pure fn add(x : f32 y : f32) -> f32 { x + y }"` (missing comma
-after `f32`), compilation produces:
+If the string is changed to `"pure fn add(x : f32 y : f32) -> f32 { x + y }"` (missing comma after `f32`), compilation
+produces:
 
 ```text
 ch02_try3.cpp:5: error: static assertion failed: compile-time parse error in Flux source
@@ -944,8 +928,8 @@ ch02_try3.cpp:5: error: static assertion failed: compile-time parse error in Flu
 ```
 
 This is Path B in action: the grammar, the parser, and the diagnostic are all executed at
-`consteval` time. Shipping a Flux source literal in C++ code that fails to parse is a
-**compile error**, not a runtime failure.
+`consteval` time. Shipping a Flux source literal in C++ code that fails to parse is a **compile error**, not a runtime
+failure.
 
 ### Try It 4 — Function with Return Type
 
@@ -982,8 +966,7 @@ is pure: true
 
 ### Try It 5 — Method Call Syntax
 
-Flux supports `expr.method(args)` — the `.` operator parses as a postfix method call with
-binding power 80:
+Flux supports `expr.method(args)` — the `.` operator parses as a postfix method call with binding power 80:
 
 ```flux
 let d = sqrt(x*x + y*y)
@@ -1011,10 +994,9 @@ binary_expr (+)
         +-- arg_list (empty)
 ```
 
-The `+` has `left_bp = 50`. When the Pratt loop processes `b`, it peeks at `.` with `left_bp = 80`,
-which is greater than the current `min_bp` of 51 (we are inside `parse_expr(51)` for the right side
-of `+`). So `.` fires and wraps `b` into a `method_call_expr` before the `+` node is closed. The
-result is `a + (b.f())`, not `(a + b).f()`.
+The `+` has `left_bp = 50`. When the Pratt loop processes `b`, it peeks at `.` with `left_bp = 80`, which is greater
+than the current `min_bp` of 51 (we are inside `parse_expr(51)` for the right side of `+`). So `.` fires and wraps `b`
+into a `method_call_expr` before the `+` node is closed. The result is `a + (b.f())`, not `(a + b).f()`.
 
 ---
 
@@ -1140,9 +1122,9 @@ Left recursion     A rule directly or indirectly calls itself as its first
                    token consumer. Fatal: would loop forever.
 ```
 
-Left recursion is the only hard failure. FIRST/FOLLOW conflicts are reported as warnings with the
-rule name and conflicting token. In practice, Flux's `cut` annotations resolve almost all FOLLOW
-ambiguities by making the parser commit before the ambiguous point is reached.
+Left recursion is the only hard failure. FIRST/FOLLOW conflicts are reported as warnings with the rule name and
+conflicting token. In practice, Flux's `cut` annotations resolve almost all FOLLOW ambiguities by making the parser
+commit before the ambiguous point is reached.
 
 ---
 
@@ -1177,32 +1159,31 @@ consteval auto scan_consteval()
 } // namespace flux
 ```
 
-The split between `parse()` (runtime) and `scan_consteval()` (compile time) is the only place
-where Path A and Path B diverge. After this call, both produce a `parse_output<flux_kind,
+The split between `parse()` (runtime) and `scan_consteval()` (compile time) is the only place where Path A and Path B
+diverge. After this call, both produce a `parse_output<flux_kind,
 token_kind>` and the AST builder (Chapter 3) handles both identically.
 
 ---
 
 ## What We Have
 
-| Artifact | Description |
-|----------|-------------|
-| `flux_kind` | Enum of 30+ CST node kinds (declarations, expressions, types, error) |
-| `flux_grammar` | PEG grammar validated at compile time; Pratt operator table |
-| `flux::parse(src)` | Runtime entry point — returns green CST + diagnostics |
-| `flux::scan_consteval<src>()` | Compile-time entry point — parse errors = compiler errors |
-| `green_arena` | Flat, index-based, source-faithful immutable CST |
-| Error recovery | `recover_with` + `skip_until_sync` — multiple errors per parse pass |
+| Artifact                      | Description                                                          |
+|-------------------------------|----------------------------------------------------------------------|
+| `flux_kind`                   | Enum of 30+ CST node kinds (declarations, expressions, types, error) |
+| `flux_grammar`                | PEG grammar validated at compile time; Pratt operator table          |
+| `flux::parse(src)`            | Runtime entry point — returns green CST + diagnostics                |
+| `flux::scan_consteval<src>()` | Compile-time entry point — parse errors = compiler errors            |
+| `green_arena`                 | Flat, index-based, source-faithful immutable CST                     |
+| Error recovery                | `recover_with` + `skip_until_sync` — multiple errors per parse pass  |
 
-The grammar is the authoritative source of truth for Flux syntax. The EBNF reference above, the
-Samasa rule structs, and the PEG operator table are all derived from the same type definitions.
-Changing the grammar means changing the structs; the parser, the validator, and the compile-time
-check all update automatically.
+The grammar is the authoritative source of truth for Flux syntax. The EBNF reference above, the Samasa rule structs, and
+the PEG operator table are all derived from the same type definitions. Changing the grammar means changing the structs;
+the parser, the validator, and the compile-time check all update automatically.
 
 ---
 
 ## Next
 
-[Chapter 3 → AST](ch03_ast.md) — lower the green CST into a typed Flux AST using a flat arena.
-The AST discards trivia, resolves operator tokens into typed expression nodes, and establishes the
-form that name resolution (Chapter 4) and type inference (Chapter 5) operate on.
+[Chapter 3 → AST](ch03_ast.md) — lower the green CST into a typed Flux AST using a flat arena. The AST discards trivia,
+resolves operator tokens into typed expression nodes, and establishes the form that name resolution (Chapter 4) and type
+inference (Chapter 5) operate on.

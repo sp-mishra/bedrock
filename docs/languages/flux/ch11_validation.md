@@ -5,6 +5,7 @@
 **Backend validation** answers: do all backends produce numerically consistent results?
 
 This is non-trivial because:
+
 - CPU uses IEEE-754 sequential arithmetic
 - SIMD may use FMA (fused multiply-add), changing rounding
 - GPU uses reduced-precision paths for performance
@@ -12,12 +13,11 @@ This is non-trivial because:
 
 ### Validation Strategy
 
-1. **Interpreter baseline** — a pure C++ tree-walking interpreter is always available as a reference.
-   It is slow but produces exact IEEE-754 results.
+1. **Interpreter baseline** — a pure C++ tree-walking interpreter is always available as a reference. It is slow but
+   produces exact IEEE-754 results.
 2. **Epsilon comparison** — floating-point results must agree within `ε = 1e-5` for `f32`,
    `1e-13` for `f64`.
-3. **Structural hash check** — the Vakya tree hash must be identical across paths (no accidental
-   rewrite divergence).
+3. **Structural hash check** — the Vakya tree hash must be identical across paths (no accidental rewrite divergence).
 4. **Type check** — all backends must agree on the output type.
 
 ---
@@ -225,8 +225,8 @@ value const& verify_backends() const {
 
 ## Structural Hash Consistency Check
 
-Beyond numeric consistency, we also verify that the Vakya tree hash is identical regardless of which
-path produced the expression:
+Beyond numeric consistency, we also verify that the Vakya tree hash is identical regardless of which path produced the
+expression:
 
 ```cpp
 // Flux source path:
@@ -325,6 +325,7 @@ int main() {
 ```
 
 Expected output:
+
 ```
 sqrt
 └── add
@@ -402,22 +403,22 @@ dist
 
 You have built a complete compiler:
 
-| Step | Artifact |
-|------|---------|
-| Ch 1 | `flux::scan()` — character stream → tokens |
-| Ch 2 | `flux::parse()` — tokens → green CST |
-| Ch 3 | `flux::build_ast()` — CST → flat AST arena |
-| Ch 4 | `flux::resolver` — bind identifiers to declarations |
-| Ch 5 | `flux::type_inferrer` — Algorithm W type inference |
-| Ch 6 | `flux::shape_inferrer` — tensor shape constraints |
-| Ch 7 | `flux::vakya_lowerer` — AST → `vakya::node` tree |
-| Ch 8 | `flux::make_flux_rules()` — rewrite rules + e-graph |
-| Ch 9 | `flux::compile<BK>()` — Vakya → MIR → native code |
+| Step  | Artifact                                             |
+|-------|------------------------------------------------------|
+| Ch 1  | `flux::scan()` — character stream → tokens           |
+| Ch 2  | `flux::parse()` — tokens → green CST                 |
+| Ch 3  | `flux::build_ast()` — CST → flat AST arena           |
+| Ch 4  | `flux::resolver` — bind identifiers to declarations  |
+| Ch 5  | `flux::type_inferrer` — Algorithm W type inference   |
+| Ch 6  | `flux::shape_inferrer` — tensor shape constraints    |
+| Ch 7  | `flux::vakya_lowerer` — AST → `vakya::node` tree     |
+| Ch 8  | `flux::make_flux_rules()` — rewrite rules + e-graph  |
+| Ch 9  | `flux::compile<BK>()` — Vakya → MIR → native code    |
 | Ch 10 | `flux::value` — fluent introspection + execution API |
 | Ch 11 | `flux::backend_verifier` — cross-backend correctness |
 
-The same Vakya tree, the same structural hash, the same optimizations, the same IR — whether you write
-Flux source or C++ EDSL.
+The same Vakya tree, the same structural hash, the same optimizations, the same IR — whether you write Flux source or
+C++ EDSL.
 
 ---
 

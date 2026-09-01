@@ -3,28 +3,24 @@
 ## What Is FFI and Why Does Flux Need It?
 
 Flux ships with a rich standard library of builtins: `sqrt`, `exp`, `log`, `sin`, `matmul`, `map`,
-`filter`, `reduce`, and more. These are hard-coded in the lowerer (Chapter 7) — each maps to a
-specific Lithe tag at compile time.
+`filter`, `reduce`, and more. These are hard-coded in the lowerer (Chapter 7) — each maps to a specific Lithe tag at
+compile time.
 
 But real programs need more:
 
-- **Custom BLAS routines** — `cblas_sgemm` with explicit row/column strides, or vendor-tuned MKL
-  kernels
-- **Domain-specific kernels** — custom activation functions (`swish`, `gelu`), specialized signal
-  processing filters
-- **System functions** — high-resolution clocks, secure random sources, hardware performance
-  counters
-- **Library integration** — Eigen reductions, OpenCV morphological operators, libm extensions that
-  are not in the Flux standard library
+- **Custom BLAS routines** — `cblas_sgemm` with explicit row/column strides, or vendor-tuned MKL kernels
+- **Domain-specific kernels** — custom activation functions (`swish`, `gelu`), specialized signal processing filters
+- **System functions** — high-resolution clocks, secure random sources, hardware performance counters
+- **Library integration** — Eigen reductions, OpenCV morphological operators, libm extensions that are not in the Flux
+  standard library
 
 Without FFI, every new function requires modifying the Flux compiler itself: add a case to
-`lower_call`, add a tag header, add a type scheme to `install_builtin_types`. That is a compiler
-contribution, not an application concern.
+`lower_call`, add a tag header, add a type scheme to `install_builtin_types`. That is a compiler contribution, not an
+application concern.
 
-**FFI lets users register C++ functions as Flux builtins from outside the compiler.** The compiler
-sees them exactly like built-ins: resolved in ch04, typed in ch05, lowered in ch07, analyzed in
-ch05b. The only difference is that the function pointer and its metadata came from user code, not
-from the compiler source tree.
+**FFI lets users register C++ functions as Flux builtins from outside the compiler.** The compiler sees them exactly
+like built-ins: resolved in ch04, typed in ch05, lowered in ch07, analyzed in ch05b. The only difference is that the
+function pointer and its metadata came from user code, not from the compiler source tree.
 
 ### The goal
 
@@ -54,29 +50,29 @@ The function is registered by name, type scheme, and raw pointer. The lowerer (c
 `ffi_call_tag` node carrying the pointer. The CPU backend calls through it at runtime.
 
 Level 1 is sufficient for:
+
 - Pure math functions with known monomorphic signatures
 - Functions where no rewrite rules or e-graph reasoning is needed
 - Quick integrations where compile-time optimization is not the goal
 
-The full ch07 → analysis → backend pipeline still runs; it just treats `ffi_call_tag` as an opaque
-call with the declared type and effect bits.
+The full ch07 → analysis → backend pipeline still runs; it just treats `ffi_call_tag` as an opaque call with the
+declared type and effect bits.
 
 ### Level 2 — Tag-based FFI: full vakya integration
 
 Register a C++ function as a first-class vakya `Tag`. The function then participates in:
 
-| Pipeline stage | What it gains |
-|---------------|---------------|
-| ch04 name resolution | Looked up by name like any builtin |
-| ch05 type inference | Has a full polymorphic type scheme |
-| ch05b analysis | Carries effect bits and capability bits |
-| ch07 lowering | Lowers to its own dedicated tag node |
-| ch08 rewrites | Can appear in pattern-matching rules |
+| Pipeline stage       | What it gains                                    |
+|----------------------|--------------------------------------------------|
+| ch04 name resolution | Looked up by name like any builtin               |
+| ch05 type inference  | Has a full polymorphic type scheme               |
+| ch05b analysis       | Carries effect bits and capability bits          |
+| ch07 lowering        | Lowers to its own dedicated tag node             |
+| ch08 rewrites        | Can appear in pattern-matching rules             |
 | e-graph optimization | Has a cost model entry; can be inlined/reordered |
-| ch06 shape inference | Can carry custom shape constraint rules |
+| ch06 shape inference | Can carry custom shape constraint rules          |
 
-Level 2 is the right choice for performance-critical kernels that the optimizer should see and
-reason about.
+Level 2 is the right choice for performance-critical kernels that the optimizer should see and reason about.
 
 ---
 
@@ -93,6 +89,7 @@ extern fn scale_inplace(t : tensor<f32>, s : f32) -> tensor<f32>
 ```
 
 The `extern fn` declaration:
+
 1. Adds the name to the symbol table during ch04 name resolution
 2. Installs the declared type scheme into the type environment for ch05 HM inference
 3. Registers an `ffi_call_tag` node at the ch07 lowering stage
@@ -101,8 +98,8 @@ No `fn` body is written in Flux. The implementation lives entirely in C++.
 
 ### Lowering `extern fn` calls
 
-At the ch07 lowering stage, `extern fn` calls lower to `lithe::ffi_call_tag`. The lowerer carries
-an `ffi_registry` reference alongside the usual `ast_arena`:
+At the ch07 lowering stage, `extern fn` calls lower to `lithe::ffi_call_tag`. The lowerer carries an `ffi_registry`
+reference alongside the usual `ast_arena`:
 
 ```cpp
 // The ffi_call_tag — a vakya tag for all Level-1 FFI calls
@@ -178,8 +175,8 @@ private:
 
 ### The FFI Registry
 
-The registry is the central data structure for Level-1 FFI. It stores bindings by name and also
-integrates with the type environment and the resolver.
+The registry is the central data structure for Level-1 FFI. It stores bindings by name and also integrates with the type
+environment and the resolver.
 
 ```cpp
 // include/languages/flux/ffi.hpp
@@ -285,8 +282,7 @@ private:
 
 ### How the compiler consumes the registry
 
-The `flux::compiler` class (the public entry point) threads the registry through each pipeline
-stage:
+The `flux::compiler` class (the public entry point) threads the registry through each pipeline stage:
 
 ```cpp
 // Sketch of flux::compiler::compile() with FFI wiring
@@ -325,9 +321,9 @@ auto flux::compiler::compile(std::string_view src) -> compiled_program
 
 ## Level 2: Tag-Based FFI — Full Vakya Integration
 
-Level 2 gives a C++ function its own dedicated vakya `Tag` with a `tag_descriptor`. This means
-the optimizer can match it by tag type, apply rewrite rules against it, and assign it a cost model
-entry. From the optimizer's perspective, it is indistinguishable from a built-in like
+Level 2 gives a C++ function its own dedicated vakya `Tag` with a `tag_descriptor`. This means the optimizer can match
+it by tag type, apply rewrite rules against it, and assign it a cost model entry. From the optimizer's perspective, it
+is indistinguishable from a built-in like
 `lithe::matmul_tag`.
 
 ### Step 1 — Define your tag type
@@ -375,8 +371,8 @@ namespace lithe::backends::cpu {
 
 ### Step 3 — Register the type scheme
 
-Add the type scheme in the same `install_builtin_types` style used in ch05, but from your own
-setup code (not inside the compiler):
+Add the type scheme in the same `install_builtin_types` style used in ch05, but from your own setup code (not inside the
+compiler):
 
 ```cpp
 // In your application setup, called before flux::compiler is constructed
@@ -404,13 +400,13 @@ void install_cblas_types(
 ```
 
 The dimension variables `M`, `K`, `N` participate in ch06 shape inference: when `cblas_sgemm(A, B)`
-is type-checked, the constraint `A.cols == B.rows` (i.e., `K == K`) is unified automatically
-because both use the same dim variable.
+is type-checked, the constraint `A.cols == B.rows` (i.e., `K == K`) is unified automatically because both use the same
+dim variable.
 
 ### Step 4 — Register shape constraints
 
-For the shape checker in ch06 to understand the matmul-compatible constraint on `cblas_sgemm`,
-register a rule against the tag:
+For the shape checker in ch06 to understand the matmul-compatible constraint on `cblas_sgemm`, register a rule against
+the tag:
 
 ```cpp
 void install_cblas_shape_constraints(
@@ -491,30 +487,28 @@ Expression: cblas_sgemm(A, B)
 
 ## Type Mapping: Flux ↔ C++ Types
 
-When a Flux value is passed to a C++ FFI function, the backend marshals it according to the
-following table.
+When a Flux value is passed to a C++ FFI function, the backend marshals it according to the following table.
 
-| Flux type | C++ type | Notes |
-|-----------|----------|-------|
-| `f32` | `float` | IEEE-754 single |
-| `f64` | `double` | IEEE-754 double |
-| `i32` | `int32_t` | |
-| `i64` | `int64_t` | |
-| `u32` | `uint32_t` | |
-| `u64` | `uint64_t` | |
-| `bool` | `bool` | |
-| `string` | `std::string_view` | read-only, no ownership transfer |
-| `tensor<f32>[M,N]` | `flux_tensor_view` | row-major, see below |
-| `tensor<f64>[N]` | `flux_tensor_view` | 1D, `ndim=1` |
-| `fn(f32) -> f32` | `std::function<float(float)>` | higher-order |
-| `vec<T>` | `flux_tensor_view` | `ndim=1`, element type from `elem_size` |
-| `tuple<A, B>` | `std::pair<A, B>` | layout by member type |
+| Flux type          | C++ type                      | Notes                                   |
+|--------------------|-------------------------------|-----------------------------------------|
+| `f32`              | `float`                       | IEEE-754 single                         |
+| `f64`              | `double`                      | IEEE-754 double                         |
+| `i32`              | `int32_t`                     |                                         |
+| `i64`              | `int64_t`                     |                                         |
+| `u32`              | `uint32_t`                    |                                         |
+| `u64`              | `uint64_t`                    |                                         |
+| `bool`             | `bool`                        |                                         |
+| `string`           | `std::string_view`            | read-only, no ownership transfer        |
+| `tensor<f32>[M,N]` | `flux_tensor_view`            | row-major, see below                    |
+| `tensor<f64>[N]`   | `flux_tensor_view`            | 1D, `ndim=1`                            |
+| `fn(f32) -> f32`   | `std::function<float(float)>` | higher-order                            |
+| `vec<T>`           | `flux_tensor_view`            | `ndim=1`, element type from `elem_size` |
+| `tuple<A, B>`      | `std::pair<A, B>`             | layout by member type                   |
 
 ### Marshalling tensors: `flux_tensor_view`
 
-Tensors passed across the FFI boundary are represented as a lightweight view struct with no
-ownership. The tensor buffer is managed by the Flux runtime; the C++ function receives a view and
-must not outlive the call.
+Tensors passed across the FFI boundary are represented as a lightweight view struct with no ownership. The tensor buffer
+is managed by the Flux runtime; the C++ function receives a view and must not outlive the call.
 
 ```cpp
 // include/languages/flux/ffi.hpp (continued)
@@ -567,8 +561,7 @@ C++ functions registered via `register_fn` must therefore have the signature:
 void my_fn(flux_tensor_view const* args, size_t nargs, flux_tensor_view* result);
 ```
 
-For scalar functions (`f32 -> f32`), the backend uses a thinner wrapper that unpacks the scalar
-directly:
+For scalar functions (`f32 -> f32`), the backend uses a thinner wrapper that unpacks the scalar directly:
 
 ```cpp
 using scalar_f32_fn_t = float(*)(float);
@@ -696,8 +689,8 @@ relu( 2.1) = 2.1
 
 ## Worked Example: Registering `cblas_sgemm` (Level 2)
 
-Full Level-2 path: custom tag, type scheme with dimension variables, shape constraints, and CPU
-backend evaluation using BLAS.
+Full Level-2 path: custom tag, type scheme with dimension variables, shape constraints, and CPU backend evaluation using
+BLAS.
 
 ### Tag definition
 
@@ -814,8 +807,8 @@ C.run(cpu)
 
 ## Inline C++ Blocks (Advanced)
 
-For truly one-off operations where no reuse is expected, Flux provides the `cpp { ... }` escape
-hatch: a block of arbitrary C++ source that the CPU backend emits verbatim.
+For truly one-off operations where no reuse is expected, Flux provides the `cpp { ... }` escape hatch: a block of
+arbitrary C++ source that the CPU backend emits verbatim.
 
 ```flux
 -- Inline C++ block: arbitrary C++ executed by the CPU backend
@@ -826,8 +819,8 @@ let result : f32 = cpp {
 }
 ```
 
-The `cpp { ... }` block compiles to a `cpp_block_tag` node. The source text is carried as a
-payload string literal in the Vakya DAG.
+The `cpp { ... }` block compiles to a `cpp_block_tag` node. The source text is carried as a payload string literal in
+the Vakya DAG.
 
 ```cpp
 // cpp_block_tag — tag for inline C++ blocks
@@ -851,16 +844,15 @@ vakya_expr vakya_lowerer::lower_cpp_block(cpp_block_node const& node) {
 
 ### Constraints on `cpp_block`
 
-Because the compiler cannot analyze arbitrary C++, `cpp_block` is subject to conservative
-restrictions:
+Because the compiler cannot analyze arbitrary C++, `cpp_block` is subject to conservative restrictions:
 
-| Property | Value | Reason |
-|----------|-------|--------|
-| Effect bits | `IO` (conservatively) | May call arbitrary system functions |
-| Capability | CPU-only | GPU/SIMD backends cannot emit raw C++ |
-| Shape inference | Must annotate explicitly | No shape information is derivable |
-| Pattern matching | Opaque | Cannot appear on the LHS of a rewrite rule |
-| E-graph cost | Maximum | Optimizer will not move or duplicate it |
+| Property         | Value                    | Reason                                     |
+|------------------|--------------------------|--------------------------------------------|
+| Effect bits      | `IO` (conservatively)    | May call arbitrary system functions        |
+| Capability       | CPU-only                 | GPU/SIMD backends cannot emit raw C++      |
+| Shape inference  | Must annotate explicitly | No shape information is derivable          |
+| Pattern matching | Opaque                   | Cannot appear on the LHS of a rewrite rule |
+| E-graph cost     | Maximum                  | Optimizer will not move or duplicate it    |
 
 ```flux
 -- Shape annotation required for cpp_block returning a tensor
@@ -871,25 +863,25 @@ let result : tensor<f32>[4, 4] = cpp {
 }
 ```
 
-If no type annotation is given, the type inferrer assigns a fresh type variable and requires the
-user to resolve the ambiguity.
+If no type annotation is given, the type inferrer assigns a fresh type variable and requires the user to resolve the
+ambiguity.
 
 ### When to use `cpp_block` vs `extern fn`
 
-| Situation | Use |
-|-----------|-----|
-| One-off expression, no reuse | `cpp_block` |
-| Reusable function, pure math | `extern fn` + `register_fn` |
-| Performance kernel, needs optimizer visibility | Level-2 `register_tag` |
-| Complex expression with multiple outputs | `cpp_block` with struct return |
-| Gradients / autodiff through the function | Level-2 only (optimizer needs tag) |
+| Situation                                      | Use                                |
+|------------------------------------------------|------------------------------------|
+| One-off expression, no reuse                   | `cpp_block`                        |
+| Reusable function, pure math                   | `extern fn` + `register_fn`        |
+| Performance kernel, needs optimizer visibility | Level-2 `register_tag`             |
+| Complex expression with multiple outputs       | `cpp_block` with struct return     |
+| Gradients / autodiff through the function      | Level-2 only (optimizer needs tag) |
 
 ---
 
 ## Safety and Effect Tracking
 
-The effect system (described in ch05b) propagates through FFI calls just like built-ins. The key
-rule: **declare the effects your C++ function actually has**.
+The effect system (described in ch05b) propagates through FFI calls just like built-ins. The key rule: **declare the
+effects your C++ function actually has**.
 
 ```cpp
 // Pure math — no effects
@@ -928,8 +920,7 @@ Error: pure fn 'bad_pure' has undeclared effect: IO
 
 ### Capability mismatch
 
-If a function is declared `caps = cap_bits::GPU` but the user requests CPU execution, the backend
-selector catches it:
+If a function is declared `caps = cap_bits::GPU` but the user requests CPU execution, the backend selector catches it:
 
 ```flux
 extern fn gpu_kernel(t : tensor<f32>) -> tensor<f32>
@@ -1009,8 +1000,8 @@ Flux source: "extern tag cblas_sgemm  ...  cblas_sgemm(A, B)"
 
 ## Complete Tutorial: Custom Activation Suite
 
-A self-contained program that registers `sigmoid`, `relu`, and `tanh_act` as Flux externs, then
-runs a mini inference pass showing all outputs.
+A self-contained program that registers `sigmoid`, `relu`, and `tanh_act` as Flux externs, then runs a mini inference
+pass showing all outputs.
 
 ```cpp
 // ffi_tutorial.cpp — complete self-contained example
@@ -1086,8 +1077,7 @@ x=+2.0  relu=2.000  sigmoid=0.881  tanh= 0.964
 
 ### Verifying type annotations
 
-After compilation, the analysis store can be queried to confirm every subexpression was correctly
-typed:
+After compilation, the analysis store can be queried to confirm every subexpression was correctly typed:
 
 ```cpp
 auto const& astore = prog.analysis_store();
@@ -1112,10 +1102,9 @@ r: type=f32 effects=pure caps=cpu
 
 ## Interaction with Rewrites (ch08)
 
-Level-2 tags can appear in algebraic rewrite rules. This enables the optimizer to reason about
-user-defined operations.
+Level-2 tags can appear in algebraic rewrite rules. This enables the optimizer to reason about user-defined operations.
 
-### Example: relu(relu(x)) → relu(x) (idempotency)
+### Example: relu (relu (x)) → relu (x) (idempotency)
 
 ```cpp
 // Register an idempotency rule for relu (Level-2 tag)
@@ -1134,8 +1123,8 @@ rewrite_engine.add_rule(relu_idem_rule);
 ```
 
 This rule fires when the optimizer sees a double-relu, eliminating one call. Level-1 `ffi_call_tag`
-nodes cannot participate in this kind of reasoning because the optimizer has no tag to match
-against — all Level-1 calls look identical from the outside.
+nodes cannot participate in this kind of reasoning because the optimizer has no tag to match against — all Level-1 calls
+look identical from the outside.
 
 ### Example: cblas_sgemm associativity
 
@@ -1153,15 +1142,14 @@ auto sgemm_assoc = vakya::types::make_guarded(
 );
 ```
 
-This follows the same guarded-rule pattern as `matmul` associativity from ch05b, now applied to
-the user-supplied BLAS tag.
+This follows the same guarded-rule pattern as `matmul` associativity from ch05b, now applied to the user-supplied BLAS
+tag.
 
 ---
 
 ## Error Messages
 
-The compiler produces structured errors for FFI problems, consistent with the type-error format
-from ch05.
+The compiler produces structured errors for FFI problems, consistent with the type-error format from ch05.
 
 ### Unknown extern fn
 
@@ -1228,18 +1216,18 @@ Error: Backend 'cpu' cannot satisfy capability requirement for extern fn gpu_onl
 
 ## What We Have
 
-| Feature | Mechanism | Header |
-|---------|-----------|--------|
-| Simple extern fn | `ffi_registry::register_fn` + `ffi_call_tag` | `flux/ffi.hpp` |
-| Tag-based FFI | `ffi_registry::register_tag` + user `tag_descriptor` | `vakya/vakya.hpp` |
-| Type scheme | `type_arena::intern_callable` / `intern_quantified` | `vakya/vakya_types.hpp` |
-| Shape constraints | `constraint_registry::register_rule` | `vakya/vakya_types.hpp` |
-| Effect declaration | `effect_bits` in `register_fn` / `register_tag` | `flux/ffi.hpp` |
-| Capability declaration | `cap_bits` in `register_fn` / `register_tag` | `flux/ffi.hpp` |
-| Tensor marshalling | `flux_tensor_view` | `flux/ffi.hpp` |
-| Inline C++ | `cpp_block_tag` via `cpp { ... }` syntax | compiler extension |
-| Rewrite integration | Level-2 tags in `vakya::pattern::rule` | `vakya/vakya.hpp` |
-| Analysis readback | `analysis_store::find_by_name` | `vakya/vakya_types.hpp` |
+| Feature                | Mechanism                                            | Header                  |
+|------------------------|------------------------------------------------------|-------------------------|
+| Simple extern fn       | `ffi_registry::register_fn` + `ffi_call_tag`         | `flux/ffi.hpp`          |
+| Tag-based FFI          | `ffi_registry::register_tag` + user `tag_descriptor` | `vakya/vakya.hpp`       |
+| Type scheme            | `type_arena::intern_callable` / `intern_quantified`  | `vakya/vakya_types.hpp` |
+| Shape constraints      | `constraint_registry::register_rule`                 | `vakya/vakya_types.hpp` |
+| Effect declaration     | `effect_bits` in `register_fn` / `register_tag`      | `flux/ffi.hpp`          |
+| Capability declaration | `cap_bits` in `register_fn` / `register_tag`         | `flux/ffi.hpp`          |
+| Tensor marshalling     | `flux_tensor_view`                                   | `flux/ffi.hpp`          |
+| Inline C++             | `cpp_block_tag` via `cpp { ... }` syntax             | compiler extension      |
+| Rewrite integration    | Level-2 tags in `vakya::pattern::rule`               | `vakya/vakya.hpp`       |
+| Analysis readback      | `analysis_store::find_by_name`                       | `vakya/vakya_types.hpp` |
 
 ---
 

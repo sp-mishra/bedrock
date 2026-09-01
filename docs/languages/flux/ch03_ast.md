@@ -2,23 +2,22 @@
 
 ## Theory
 
-The **CST** (Concrete Syntax Tree) is source-faithful but noisy: it contains every keyword, comma,
-brace, and whitespace position. The **AST** (Abstract Syntax Tree) strips syntactic noise and gives
-semantic structure.
+The **CST** (Concrete Syntax Tree) is source-faithful but noisy: it contains every keyword, comma, brace, and whitespace
+position. The **AST** (Abstract Syntax Tree) strips syntactic noise and gives semantic structure.
 
 ### Why a separate AST?
 
 1. **Type annotation** — AST nodes carry type metadata added by inference passes.
-2. **Simplified structure** — `if` in the CST has tokens `if`, `{`, `}`, `else`, `{`, `}`.
-   In the AST it is `if_expr { cond, then_body, else_body }`.
-3. **Decoupled passes** — name resolution, type inference, and lowering all work on the AST,
-   not the CST. Passes never re-parse.
+2. **Simplified structure** — `if` in the CST has tokens `if`, `{`, `}`, `else`, `{`, `}`. In the AST it is
+   `if_expr { cond, then_body, else_body }`.
+3. **Decoupled passes** — name resolution, type inference, and lowering all work on the AST, not the CST. Passes never
+   re-parse.
 4. **Arena allocation** — flat index-based storage; no pointer chasing; cache-friendly.
 
 ### Flat Arena
 
-`lang::ast_arena<Node>` stores nodes as a contiguous vector. Each node is a `std::variant` of all
-possible node types. Children are stored as indices into the same arena.
+`lang::ast_arena<Node>` stores nodes as a contiguous vector. Each node is a `std::variant` of all possible node types.
+Children are stored as indices into the same arena.
 
 ```
 arena[0] = program_node { decls=[1,3], expr=5 }

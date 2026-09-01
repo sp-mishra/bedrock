@@ -2,126 +2,98 @@
 
 ## Bedrock Migration Status
 
-Lithe now lives at `bedrock/include/lithe/` and is a local C++23 compiler,
-interpreter, and execution engine over Pebble's Vākya, container, memory, and
-diagnostic substrate. Its stable entry point is `lithe/lithe.hpp`.
+Lithe now lives at `bedrock/include/lithe/` and is a local C++23 compiler, interpreter, and execution engine over
+Pebble's Vākya, container, memory, and diagnostic substrate. Its stable entry point is `lithe/lithe.hpp`.
 
-The migrated Lithe and Crank Catch2 suites live in `bedrock/src/tests/` and
-are enabled by `-DBUILD_TESTS=ON`; CMake exposes them through `bedrock_tests`.
+The migrated Lithe and Crank Catch2 suites live in `bedrock/src/tests/` and are enabled by `-DBUILD_TESTS=ON`; CMake
+exposes them through `bedrock_tests`.
 
-AsmJit is available through the opt-in `bedrock::lithe_asmjit` target. It
-provides the native x64/AArch64 JIT backend without adding a JIT dependency to
-portable `bedrock::lithe` consumers.
+AsmJit is available through the opt-in `bedrock::lithe_asmjit` target. It provides the native x64/AArch64 JIT backend
+without adding a JIT dependency to portable `bedrock::lithe` consumers.
 
-The native Metal backend is registered as `metal`. It shares a non-owning
-HL-MIR legality and binding plan with Vulkan: verified rank-1 contiguous f32
-elementwise regions (loads, stores, arithmetic, comparisons, select, and f32
-constants) lower to MSL, compile through `dependencies/metal-cpp`, and
-dispatch through Pravaha. The earlier physical-MIR integer path remains a
-compatibility route. Loop-carried reductions are recognized by the shared
-device plan and deliberately rejected by the current elementwise emitters:
-they require an explicit workgroup reduction ABI. Non-contiguous or dynamic
-layouts, mixed types, calls, and control flow are likewise rejected until their
-ABI and lowering are explicit.
-Consumers that call this native path link `bedrock::lithe_metal`; the stable
-API remains `lithe::codegen::backends::metal_backend` and does not expose
-Metal-C++ types.
+The native Metal backend is registered as `metal`. It shares a non-owning HL-MIR legality and binding plan with Vulkan:
+verified rank-1 contiguous f32 elementwise regions (loads, stores, arithmetic, comparisons, select, and f32 constants)
+lower to MSL, compile through `dependencies/metal-cpp`, and dispatch through Pravaha. The earlier physical-MIR integer
+path remains a compatibility route. Loop-carried reductions are recognized by the shared device plan and deliberately
+rejected by the current elementwise emitters:
+they require an explicit workgroup reduction ABI. Non-contiguous or dynamic layouts, mixed types, calls, and control
+flow are likewise rejected until their ABI and lowering are explicit. Consumers that call this native path link
+`bedrock::lithe_metal`; the stable API remains `lithe::codegen::backends::metal_backend` and does not expose Metal-C++
+types.
 
-The Crank GPU example constructs the shared HL-MIR plan, selects Metal first
-on macOS, and verifies the dispatched f32 add result. Its SPIR-V check remains
-a portability probe; it is not used to decide native Metal availability.
+The Crank GPU example constructs the shared HL-MIR plan, selects Metal first on macOS, and verifies the dispatched f32
+add result. Its SPIR-V check remains a portability probe; it is not used to decide native Metal availability.
 
-Native Metal pipeline compilation is bounded and cached by semantic source
-identity through Pebble's Kosha cache. Repeated host/device workloads can use
-Pravaha's opt-in `metal_buffer_set<T, K>` to retain shared buffers and
-`metal_submission` to submit without immediately waiting. Neither facility is
-part of portable Lithe artifacts or required by a non-Metal consumer.
+Native Metal pipeline compilation is bounded and cached by semantic source identity through Pebble's Kosha cache.
+Repeated host/device workloads can use Pravaha's opt-in `metal_buffer_set<T, K>` to retain shared buffers and
+`metal_submission` to submit without immediately waiting. Neither facility is part of portable Lithe artifacts or
+required by a non-Metal consumer.
 
 For device-only chains, `metal_f32_tensor` owns ephemeral Metal storage and
-`metal_backend::dispatch_f32_device_async` consumes and produces those tensors
-without an intermediate host copy. `upload()` and `download()` are explicit;
-the move-only completion token retains the pipeline until `wait()` completes.
+`metal_backend::dispatch_f32_device_async` consumes and produces those tensors without an intermediate host copy.
+`upload()` and `download()` are explicit; the move-only completion token retains the pipeline until `wait()` completes.
 Crank exposes these as `gpu_f32_tensor` and `dispatch_metal_device_async`.
 
-`lithe::exec::auto_execution_policy` controls this automatically. Its default
-retains only an internal, compatible device chain above 64 KiB and downloads at
-the next host-observation boundary. Users may select `prefer_device`,
-`require_device`, or `host_only`, and tune the device-chain length, minimum
-bytes, memory budget, fusion, and asynchronous submission independently of
-portable execution.
+`lithe::exec::auto_execution_policy` controls this automatically. Its default retains only an internal, compatible
+device chain above 64 KiB and downloads at the next host-observation boundary. Users may select `prefer_device`,
+`require_device`, or `host_only`, and tune the device-chain length, minimum bytes, memory budget, fusion, and
+asynchronous submission independently of portable execution.
 
-Crank represents such chains with `gpu_execution_graph`, backed directly by
-Pebble's `litegraph::Graph`. It topologically schedules device dependencies,
-marks internal outputs as device-consumed, and derives residency, transfer, and
-fusion-candidate decisions without duplicating a graph container in Lithe.
+Crank represents such chains with `gpu_execution_graph`, backed directly by Pebble's `litegraph::Graph`. It
+topologically schedules device dependencies, marks internal outputs as device-consumed, and derives residency, transfer,
+and fusion-candidate decisions without duplicating a graph container in Lithe.
 `execute` accepts a statically-bound resolver returning
-`std::expected<void, std::string>`; the resolver owns the typed kernel/buffer
-bindings and any asynchronous submission tokens. `fuse_parallel_hl_regions`
-applies Lithe's existing structural fusion pass before device-plan extraction,
-subject to the same policy.
+`std::expected<void, std::string>`; the resolver owns the typed kernel/buffer bindings and any asynchronous submission
+tokens. `fuse_parallel_hl_regions`
+applies Lithe's existing structural fusion pass before device-plan extraction, subject to the same policy.
 
-For Metal, `gpu_metal_executor` is the typed opt-in data-plane adapter. It
-accepts `gpu_metal_graph_binding` records, uploads each distinct graph input
-once, keeps producer tensors device-resident for declared dependencies, retains
-all completion tokens until the graph completes, and copies only explicitly
-host-observed outputs. Its graph shape still uses Pebble LiteGraph; its tensor
-and submission storage is intentionally local and ephemeral.
+For Metal, `gpu_metal_executor` is the typed opt-in data-plane adapter. It accepts `gpu_metal_graph_binding` records,
+uploads each distinct graph input once, keeps producer tensors device-resident for declared dependencies, retains all
+completion tokens until the graph completes, and copies only explicitly host-observed outputs. Its graph shape still
+uses Pebble LiteGraph; its tensor and submission storage is intentionally local and ephemeral.
 
-No GPU-specific facility is added to Pebble's common language layer. The
-executor instead uses its existing `lang::telemetry::phase_observer` seam via
-`execute_observed`; the default observer is empty, while a language can opt
-into NADI metrics and feedback through Pebble's policy types.
+No GPU-specific facility is added to Pebble's common language layer. The executor instead uses its existing
+`lang::telemetry::phase_observer` seam via
+`execute_observed`; the default observer is empty, while a language can opt into NADI metrics and feedback through
+Pebble's policy types.
 
-Crank's opt-in `gpu_pipeline.hpp` is the frontend bridge: it borrows typed f32
-host tensor views, records region dependencies in the Pebble graph, runs
-HL-MIR fusion before Lithe device-plan extraction, and invokes the Metal
-executor. Crank retains host-buffer ownership; Lithe retains only non-owning
-plans; Metal tensors and submissions are temporary execution state.
-Before a Crank pipeline dispatches, it conservatively admits the complete
-resident tensor set against `auto_execution_policy::max_device_cache_bytes`.
-An over-budget chain fails before any device write with
-`gpu_dispatch_status::resource_exhausted`, so the frontend can safely choose
-its scalar or SIMD fallback.
+Crank's opt-in `gpu_pipeline.hpp` is the frontend bridge: it borrows typed f32 host tensor views, records region
+dependencies in the Pebble graph, runs HL-MIR fusion before Lithe device-plan extraction, and invokes the Metal
+executor. Crank retains host-buffer ownership; Lithe retains only non-owning plans; Metal tensors and submissions are
+temporary execution state. Before a Crank pipeline dispatches, it conservatively admits the complete resident tensor set
+against `auto_execution_policy::max_device_cache_bytes`. An over-budget chain fails before any device write with
+`gpu_dispatch_status::resource_exhausted`, so the frontend can safely choose its scalar or SIMD fallback.
 
-`languages/crank/tensor_runtime.hpp` provides the typed Crank entry point for
-such lowered binary f32 regions. `execute_f32_binary` attempts the pipeline
-first and invokes a statically-bound scalar/SIMD fallback only before GPU
-submission when the configured policy permits it. Scalar-only Crank users do
-not include this header or pay for the Metal path.
+`languages/crank/tensor_runtime.hpp` provides the typed Crank entry point for such lowered binary f32 regions.
+`execute_f32_binary` attempts the pipeline first and invokes a statically-bound scalar/SIMD fallback only before GPU
+submission when the configured policy permits it. Scalar-only Crank users do not include this header or pay for the
+Metal path.
 
-When the prebuilt MoltenVK package is present, `bedrock::lithe_vulkan` exposes
-the same Crank graph bindings through the existing Pravaha Vulkan staging data
-plane and Lithe SPIR-V resource/fence path. Metal remains preferred on macOS.
-For compatible f32 elementwise chains, both providers retain graph
-intermediates on device and download only terminal outputs. Pravaha owns the
-move-only Vulkan tensor storage; Lithe retains pipeline, descriptor, and fence
-ownership. Metal remains the preferred macOS provider.
+When the prebuilt MoltenVK package is present, `bedrock::lithe_vulkan` exposes the same Crank graph bindings through the
+existing Pravaha Vulkan staging data plane and Lithe SPIR-V resource/fence path. Metal remains preferred on macOS. For
+compatible f32 elementwise chains, both providers retain graph intermediates on device and download only terminal
+outputs. Pravaha owns the move-only Vulkan tensor storage; Lithe retains pipeline, descriptor, and fence ownership.
+Metal remains the preferred macOS provider.
 
-`BEDROCK_ENABLE_LITHE_VULKAN` controls the optional target and defaults on when
-the checked-in MoltenVK package is available. Highway SIMD and the interpreter
-remain portable fallbacks.
+`BEDROCK_ENABLE_LITHE_VULKAN` controls the optional target and defaults on when the checked-in MoltenVK package is
+available. Highway SIMD and the interpreter remain portable fallbacks.
 
-The Crank example runner offers `--benchmark-gpu` for an explicit comparison.
-It measures the same cached f32-add HL-MIR plan through direct Metal and
-Vulkan/MoltenVK dispatch, including host transfer and completion, without
-changing automatic provider selection.
+The Crank example runner offers `--benchmark-gpu` for an explicit comparison. It measures the same cached f32-add HL-MIR
+plan through direct Metal and Vulkan/MoltenVK dispatch, including host transfer and completion, without changing
+automatic provider selection.
 
-`crank_gpu_pipeline::execute_observed()` remains automatic. Its optional final
-provider argument is an explicit tuning/test override for a caller that needs
-to evaluate a particular available provider.
+`crank_gpu_pipeline::execute_observed()` remains automatic. Its optional final provider argument is an explicit
+tuning/test override for a caller that needs to evaluate a particular available provider.
 
-Durable artifacts use the opt-in Petika catalog adapter. RocksDB is not a
-Bedrock Lithe dependency. Persistent records contain portable IR, MSL, or
-SPIR-V bytes and compatibility metadata only; live JIT, Metal, and Vulkan
-handles are never persisted. Petika owns the durable catalog boundary.
+Durable artifacts use the opt-in Petika catalog adapter. RocksDB is not a Bedrock Lithe dependency. Persistent records
+contain portable IR, MSL, or SPIR-V bytes and compatibility metadata only; live JIT, Metal, and Vulkan handles are never
+persisted. Petika owns the durable catalog boundary.
 
-Scheduling, networking, retries, and distributed execution are Pravaha
-responsibilities. Lithe reuses Pravaha only behind its optional native Metal
-provider for device ownership and dispatch.
+Scheduling, networking, retries, and distributed execution are Pravaha responsibilities. Lithe reuses Pravaha only
+behind its optional native Metal provider for device ownership and dispatch.
 
-The remainder is migrated reference material. RocksDB and an already-enabled
-Vulkan backend remain legacy context until their corresponding Bedrock provider
-is enabled.
+The remainder is migrated reference material. RocksDB and an already-enabled Vulkan backend remain legacy context until
+their corresponding Bedrock provider is enabled.
 
 ## Executive Architecture Summary
 
@@ -231,15 +203,14 @@ consumes it: `lithe_core.hpp` re-exports the `vakya::` construction surface (`no
 `IRBuilder`, `emit::tag_descriptor`, `tree::*`, `graph::*`, `structural_hash`/`structural_equal`, the pattern DSL) under
 namespace `lithe` and adds the compiler-specific layers — phase wrappers, semantic analysis, passes, codegen, and
 backends — on top. Code written against `lithe::` names is unaffected. See [vakya.md](../vakya/vakya.md) for the
-standalone
-substrate.
+standalone substrate.
 
 | Property       | Detail                                                         |
 |----------------|----------------------------------------------------------------|
 | Standard       | C++23 (`std::expected`, explicit object params, `std::ranges`) |
-| Delivery       | Header-only (`include/lithe/`)                                  |
+| Delivery       | Header-only (`include/lithe/`)                                 |
 | Namespace      | `lithe`                                                        |
-| Entry header   | `lithe/lithe.hpp` (aggregates all sub-headers)                  |
+| Entry header   | `lithe/lithe.hpp` (aggregates all sub-headers)                 |
 | No virtual fns | All dispatch via templates and concepts                        |
 | No macros      | Plugin registration is macro-free via NTTP descriptors         |
 
@@ -391,8 +362,8 @@ substrate.
 
 **Layer inclusion model:**
 
-- `lithe/lithe.hpp` aggregates all core layers (AST through backends + algorithm model + static engine + IR interchange).
-  Does NOT include `lithe_rt.hpp`.
+- `lithe/lithe.hpp` aggregates all core layers (AST through backends + algorithm model + static engine + IR
+  interchange). Does NOT include `lithe_rt.hpp`.
 - `lithe/lithe_rt.hpp` is a separate opt-in aggregate for the managed runtime overlay. Core users pay nothing for it.
 - All dispatch is static: templates, concepts, `if constexpr`. No virtual functions, no macros.
 
@@ -400,24 +371,24 @@ substrate.
 
 ## Algorithms Used
 
-Concrete named algorithms across the compiler, with the header they live in. (Detailed prose per
-subsystem follows in the sections below; this is the consolidated index.)
+Concrete named algorithms across the compiler, with the header they live in. (Detailed prose per subsystem follows in
+the sections below; this is the consolidated index.)
 
-| Concern | Algorithm | Where |
-|---|---|---|
-| Semantic canonicalization | Rewrite-rule normalization pass (`semantic_canonicalization_pass`) + structural-hash dedup | `lithe_semantic_passes.hpp` |
-| Optimization passes | simplify · constant-folding · strength-reduction · common-subexpression elimination (CSE) · dead/live-subtree elimination · algebraic canonicalization | `lithe_passes.hpp` |
-| Equality saturation | E-graph optimization: intern → saturate (rule set + `saturation_limits`) → `extract_best<CostModel>` → `rebuild_expr` (union-find + hash-cons, egg-style rebuild) | `lithe_egraph.hpp`, `containers/graph/egraph.hpp` |
-| Lowering | AST → MIR lowering; CFG construction via NAryTree + LiteGraph | `lithe_lowering.hpp`, `lithe_codegen.hpp` |
-| HL codegen passes | loop fusion · tiling · vectorization · polyhedral transforms | `lithe_codegen_hl_passes.hpp` |
-| Dependence analysis | Program Dependence Graph (data + control dependence edges) | `lithe_pdg.hpp` |
-| Loop analysis | Polyhedral model: affine-matrix domains, loop extract / fusion / interchange | `lithe_poly.hpp` |
-| Backend selection | Cost-based selector (10-step gate) + selector strategies: cost_based / profile_guided / rule_based / learned | `lithe_selector_strategy.hpp`, `lithe_decision_engine.hpp` |
-| Cost modeling | Unified cost-model framework; adaptive/profile-guided cost refinement | `lithe_algorithms.hpp`, `lithe_pgo.hpp` |
-| Backends | 8 codegen backends: debug_text · interpreter · text assembler · asmjit JIT · SIMD (Highway) · native Metal · Vulkan (SPIR-V) · null | `include/lithe/backends/` |
-| Backend registry | Generational-handle + slot_map registry with shared-lock acquire protocol | `lithe_execution/registry.hpp` |
-| Feature extraction | Static feature extraction + feature store for ML-guided selection | `lithe_feature_extractor.hpp`, `lithe_feedback.hpp` |
-| Safepoints | Safepoint + stack-map injection for managed runtime | `lithe_safepoint.hpp` |
+| Concern                   | Algorithm                                                                                                                                                         | Where                                                      |
+|---------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|
+| Semantic canonicalization | Rewrite-rule normalization pass (`semantic_canonicalization_pass`) + structural-hash dedup                                                                        | `lithe_semantic_passes.hpp`                                |
+| Optimization passes       | simplify · constant-folding · strength-reduction · common-subexpression elimination (CSE) · dead/live-subtree elimination · algebraic canonicalization            | `lithe_passes.hpp`                                         |
+| Equality saturation       | E-graph optimization: intern → saturate (rule set + `saturation_limits`) → `extract_best<CostModel>` → `rebuild_expr` (union-find + hash-cons, egg-style rebuild) | `lithe_egraph.hpp`, `containers/graph/egraph.hpp`          |
+| Lowering                  | AST → MIR lowering; CFG construction via NAryTree + LiteGraph                                                                                                     | `lithe_lowering.hpp`, `lithe_codegen.hpp`                  |
+| HL codegen passes         | loop fusion · tiling · vectorization · polyhedral transforms                                                                                                      | `lithe_codegen_hl_passes.hpp`                              |
+| Dependence analysis       | Program Dependence Graph (data + control dependence edges)                                                                                                        | `lithe_pdg.hpp`                                            |
+| Loop analysis             | Polyhedral model: affine-matrix domains, loop extract / fusion / interchange                                                                                      | `lithe_poly.hpp`                                           |
+| Backend selection         | Cost-based selector (10-step gate) + selector strategies: cost_based / profile_guided / rule_based / learned                                                      | `lithe_selector_strategy.hpp`, `lithe_decision_engine.hpp` |
+| Cost modeling             | Unified cost-model framework; adaptive/profile-guided cost refinement                                                                                             | `lithe_algorithms.hpp`, `lithe_pgo.hpp`                    |
+| Backends                  | 8 codegen backends: debug_text · interpreter · text assembler · asmjit JIT · SIMD (Highway) · native Metal · Vulkan (SPIR-V) · null                               | `include/lithe/backends/`                                  |
+| Backend registry          | Generational-handle + slot_map registry with shared-lock acquire protocol                                                                                         | `lithe_execution/registry.hpp`                             |
+| Feature extraction        | Static feature extraction + feature store for ML-guided selection                                                                                                 | `lithe_feature_extractor.hpp`, `lithe_feedback.hpp`        |
+| Safepoints                | Safepoint + stack-map injection for managed runtime                                                                                                               | `lithe_safepoint.hpp`                                      |
 
 ---
 
@@ -496,9 +467,9 @@ Four thin value wrappers mark the compilation phase of an expression without cha
 | `OG1`   | Alias for O2 (debug-info-friendly variant)                                 |
 | `Debug` | O2 with full trace enabled via `compiler::context`                         |
 
-Tree profiles contain only passes that transform trees. Pure CSE and effect-aware
-DCE run in the portable HL-MIR optimizer, where shared values and liveness are
-representable; `true_cse_pass` remains available only as a compatibility marker.
+Tree profiles contain only passes that transform trees. Pure CSE and effect-aware DCE run in the portable HL-MIR
+optimizer, where shared values and liveness are representable; `true_cse_pass` remains available only as a compatibility
+marker.
 
 Apply a preset:
 
@@ -598,22 +569,22 @@ struct tag_descriptor {
 };
 ```
 
-- **Reserved id band:** built-in tags use `stable_id < kExtensionIdBase` (`= 1000`); downstream
-  EDSLs MUST return `stable_id >= kExtensionIdBase` so ids never collide.
+- **Reserved id band:** built-in tags use `stable_id < kExtensionIdBase` (`= 1000`); downstream EDSLs MUST return
+  `stable_id >= kExtensionIdBase` so ids never collide.
 - **`kVariadicArity`** (`= 0xFF`) marks variadic/unknown arity.
 - **Register a custom tag** by specialising `tag_descriptor` in your *own* header — zero edits to
-  `lithe_core.hpp`. `structural_hash` folds `stable_id` automatically, so custom tags hash into
-  distinct buckets with no further work.
-- `tag_name<Tag>::value` (→ `const char*`, used by `dump`) and `tag_id<Tag>::value` are now thin
-  aliases over `tag_descriptor::symbol` / `::stable_id`.
-- **Value-aware hashing** — `structural_hash` is topology-only by default. If a leaf node carries a
-  payload that must distinguish otherwise-identical trees (e.g. a typed constant `lit(1.0f)` vs
+  `lithe_core.hpp`. `structural_hash` folds `stable_id` automatically, so custom tags hash into distinct buckets with no
+  further work.
+- `tag_name<Tag>::value` (→ `const char*`, used by `dump`) and `tag_id<Tag>::value` are now thin aliases over
+  `tag_descriptor::symbol` / `::stable_id`.
+- **Value-aware hashing** — `structural_hash` is topology-only by default. If a leaf node carries a payload that must
+  distinguish otherwise-identical trees (e.g. a typed constant `lit(1.0f)` vs
   `lit(2.0f)`), define an ADL hook in your own header:
   ```cpp
   std::size_t structural_payload_hash(const MyLitNode&) noexcept;
   ```
-  `structural_hash` detects the hook via concept and mixes it in. Tags without the hook have zero
-  overhead — the detection is compile-time only.
+  `structural_hash` detects the hook via concept and mixes it in. Tags without the hook have zero overhead — the
+  detection is compile-time only.
 
 **Wrappers for plain terminals:**
 
@@ -822,8 +793,8 @@ auto opt = lithe::passes::with_trace(lithe::preset::O2{}, tracer)(expr);
 // tracer.trace.compilation_events / rewrite_events / structural_hash_events also populated
 ```
 
-`semantic_canonicalization_pass`: specialized pass that rewrites `semantic_info` annotations;
-emits `semantic_canonicalization_event` (visited/rewritten node counts, fired rules).
+`semantic_canonicalization_pass`: specialized pass that rewrites `semantic_info` annotations; emits
+`semantic_canonicalization_event` (visited/rewritten node counts, fired rules).
 
 **`pass_local_cache`** — per-pipeline memoization keyed by structural hash; backed by `std::any` for type-erasure.
 
@@ -870,14 +841,13 @@ template <> struct pass_type_traits<my_pass> : pass_type_traits_base {
 };
 ```
 
-`pass_effect_kind` states the currently observable role of a pass independently
-of its pipeline category: `transforms`, `analyzes`, `annotates`, or
-`placeholder`. This lets profiles and diagnostics distinguish a named
-optimization that changes IR from an analysis-only or intentionally scaffolded
-pass. Built-ins mark `dead_subtree_elimination_pass` as `analyzes` and
+`pass_effect_kind` states the currently observable role of a pass independently of its pipeline category: `transforms`,
+`analyzes`, `annotates`, or
+`placeholder`. This lets profiles and diagnostics distinguish a named optimization that changes IR from an analysis-only
+or intentionally scaffolded pass. Built-ins mark `dead_subtree_elimination_pass` as `analyzes` and
 `true_cse_pass` as `placeholder`; extension pass traits default to
-`transforms` for source compatibility. `export_profile()` includes this effect
-for every pass, and the standard profiles exclude non-transforming effects.
+`transforms` for source compatibility. `export_profile()` includes this effect for every pass, and the standard profiles
+exclude non-transforming effects.
 
 `stable_id` bands:
 
@@ -885,8 +855,8 @@ for every pass, and the standard profiles exclude non-transforming effects.
 - `[1000, ∞)` — extension / plugin passes
 
 Built-in passes with specializations: `simplify_add_zero_pass` (id=10), `simplify_mul_identity_pass` (11),
-`constant_fold_arith_pass` (12), `strength_reduction_pass` (13), `dead_subtree_elimination_pass` (14), `true_cse_pass` (
-15), `constant_propagation_pass` (16), `canonicalize_commutative_pass` (17), `live_subtree_analysis_pass` (18),
+`constant_fold_arith_pass` (12), `strength_reduction_pass` (13), `dead_subtree_elimination_pass` (14), `true_cse_pass`
+(15), `constant_propagation_pass` (16), `canonicalize_commutative_pass` (17), `live_subtree_analysis_pass` (18),
 `enhanced_algebraic_canonicalization_pass` (19).
 
 **Consteval bundle introspection** — zero-overhead, `consteval` queries over a `pass_bundle`:
@@ -932,8 +902,8 @@ builtin band, duplicate id, conflict with an already-registered pass.
 
 ### Optimization Profiles (`lithe_profiles.hpp`)
 
-Internal fragment included at the end of `lithe_passes.hpp`; available via `#include "lithe/lithe_passes.hpp"`.
-All types live in `namespace lithe::profile`.
+Internal fragment included at the end of `lithe_passes.hpp`; available via `#include "lithe/lithe_passes.hpp"`. All
+types live in `namespace lithe::profile`.
 
 **`profile_descriptor`** — structural (NTTP-usable) metadata record:
 
@@ -1017,8 +987,8 @@ stage monotonicity applies to IR-lowering pipelines.
 | `std_debug`         | `preset::Debug`        | 6           | `"std.debug"`         |
 | `std_semantic_safe` | `preset::SemanticSafe` | 6           | `"std.semantic_safe"` |
 
-`preset::O0..O3/Debug/SemanticSafe` remain unchanged — back-compat surface. All built-in profile types are empty (
-sizeof == 1).
+`preset::O0..O3/Debug/SemanticSafe` remain unchanged — back-compat surface. All built-in profile types are empty
+(sizeof == 1).
 
 **Descriptor constants:** `k_std_o0_desc`, `k_std_o1_desc`, `k_std_o2_desc`, `k_std_o3_desc`, `k_std_debug_desc`,
 `k_std_semantic_safe_desc`.
@@ -1260,8 +1230,8 @@ struct object_ptr        { void* ptr; const object_layout* layout; };
 ```
 
 **`ObjectManager` concept**: structural contract requiring `allocate`, `deallocate`, `get_field`, `set_field`,
-`invoke_method`. `deallocate_instance` returns `std::expected<void, mop_error>` — a null pointer or
-layout-mismatched deallocation is reported as `mop_error` (e.g. `bad_layout`) rather than silently leaking.
+`invoke_method`. `deallocate_instance` returns `std::expected<void, mop_error>` — a null pointer or layout-mismatched
+deallocation is reported as `mop_error` (e.g. `bad_layout`) rather than silently leaking.
 
 **Provided managers:**
 
@@ -1411,11 +1381,10 @@ assert(*result == 42);
 
 ### `lithe_codegen_interpreter.hpp`
 
-Bytecode interpreter over allocated MIR. No JIT or external deps. It is a
-defined subset executor: `call`, `load_symbol`, aggregate operations, and
-`indirect_call` must be lowered before interpretation. The backend preflights
-the whole physical MIR and rejects those opcodes before it mutates runtime
-state.
+Bytecode interpreter over allocated MIR. No JIT or external deps. It is a defined subset executor: `call`,
+`load_symbol`, aggregate operations, and
+`indirect_call` must be lowered before interpretation. The backend preflights the whole physical MIR and rejects those
+opcodes before it mutates runtime state.
 
 ```cpp
 struct interpreter_backend {
@@ -1515,8 +1484,8 @@ auto art = lithe::codegen::backends::execute_with_fallback(fn, *primary, *fallba
 
 ### `execution_engine<Policy>` — unified policy-dispatched engine
 
-`execution_engine<Policy>` (defined in `lithe_codegen_interpreter.hpp`) unifies
-constexpr partial evaluation, interpreter execution, and JIT emission behind a single
+`execution_engine<Policy>` (defined in `lithe_codegen_interpreter.hpp`) unifies constexpr partial evaluation,
+interpreter execution, and JIT emission behind a single
 `execute(fn) → compilation_artifact` call.
 
 | Policy                       | Alias              | Behaviour                                     |
@@ -1534,23 +1503,21 @@ eng.with_target(jit);                    // bind any CodeEmissionTarget (non-own
 auto art = eng.execute(fn);              // delegates to jit.emit(fn)
 ```
 
-`with_target<T>(T& t)` stores a type-erased function pointer — no include-graph
-coupling to AsmJit or any specific backend. If no target is bound, `execute()` returns
-a diagnostic artifact (`kind == jit_function`, one diagnostics entry) instead of crashing.
+`with_target<T>(T& t)` stores a type-erased function pointer — no include-graph coupling to AsmJit or any specific
+backend. If no target is bound, `execute()` returns a diagnostic artifact (`kind == jit_function`, one diagnostics
+entry) instead of crashing.
 
-Fluent setters `with_arguments(args)` and `with_signature(sig)` apply on all policies
-(only the runtime path inspects them).
+Fluent setters `with_arguments(args)` and `with_signature(sig)` apply on all policies (only the runtime path inspects
+them).
 
 ---
 
 ## Execution Model
 
-Lithe has one execution *pipeline*, not four. **JIT, AOT, and GPU are entry
-points into the same codegen path** — physical MIR → a per-target codegen
-backend → a native artifact. AOT is JIT plus persistence (serialize the native
-output, reload next run). GPU is JIT for the device (MIR → SPIR-V/Metal, the
-driver finishes to device ISA). **Interpretation is the only mode with no
-codegen and the only one that runs a host-side per-instruction loop** — it is
+Lithe has one execution *pipeline*, not four. **JIT, AOT, and GPU are entry points into the same codegen path** —
+physical MIR → a per-target codegen backend → a native artifact. AOT is JIT plus persistence (serialize the native
+output, reload next run). GPU is JIT for the device (MIR → SPIR-V/Metal, the driver finishes to device ISA).
+**Interpretation is the only mode with no codegen and the only one that runs a host-side per-instruction loop** — it is
 the portable fallback, not a peer execution strategy.
 
 | mode      | codegen?           | when               | artifact kept                            | executes                                      |
@@ -1600,8 +1567,8 @@ Backend → mode mapping:
   dispatch loop.
 - `asmjit_backend` (`lithe_codegen_asmjit.hpp`) = CPU codegen emitter (x64/AArch64) → `jit_function_handle`. Serves BOTH
   JIT (run now) and AOT (serialize + reload).
-- Vulkan (`lithe_codegen_vulkan.hpp`) and native Metal (`lithe_codegen_metal.hpp`) = GPU codegen. Their own JIT (runtime kernel build) + AOT (cached kernel
-  binary).
+- Vulkan (`lithe_codegen_vulkan.hpp`) and native Metal (`lithe_codegen_metal.hpp`) = GPU codegen. Their own JIT (runtime
+  kernel build) + AOT (cached kernel binary).
 - `execution_engine<Policy>` (`lithe_codegen_interpreter.hpp`) = policy dispatcher that selects a backend and applies
   the fallback rule.
 - Selection: **device affinity (cpu/simd/gpu) picks WHICH codegen backend; JIT vs AOT picks run-now vs
@@ -1609,7 +1576,7 @@ Backend → mode mapping:
 
 Cost model — "pay for what you use":
 
-- Interpreter: ~40 ns/instr fixed dispatch (heap operand vectors + `variant`/`optional` unwrap). Cost = O(iters ×
+- Interpreter: ~40 ns/instr fixed dispatch (heap operand vectors + `variant`/`optional` unwrap). Cost = O (iters ×
   instrs × dispatch). A 100 k counted loop is 100 % dispatch → **322×/238×** slowdown on sum/harmonic benchmarks.
 - Codegen (JIT/AOT/GPU): whole function → native; the loop is native branches; runtime = one fn-pointer `call()` (or one
   kernel dispatch). → C++ parity.
@@ -1633,10 +1600,10 @@ Entry points (`include/lithe/lithe_execution/compile.hpp`, namespace `lithe::exe
   `prepared_execution::native_entry()` exposes a non-owning typed i64 entry for a hot loop; the prepared object retains
   artifact ownership for the entry's lifetime.
 - `compile_observed<Observer>` / `prepare_observed<Observer>` and
-  `prepared_execution::invoke_observed<Observer>` instrument backend compilation and execution. `Observer` is a
-  static policy from `languages/generic/observability/phase.hpp`: it may route fixed-size phase metrics to Nadi and/or
-  a feedback sink. The default observer is an empty no-op type, so normal Lithe calls do not read clocks, allocate,
-  mutate trace state, or branch for telemetry.
+  `prepared_execution::invoke_observed<Observer>` instrument backend compilation and execution. `Observer` is a static
+  policy from `languages/generic/observability/phase.hpp`: it may route fixed-size phase metrics to Nadi and/or a
+  feedback sink. The default observer is an empty no-op type, so normal Lithe calls do not read clocks, allocate, mutate
+  trace state, or branch for telemetry.
 - **crank frontend entry:** `execute_planned` (`languages/crank/plan.hpp` + `execute.hpp`); crank's planner (
   `construct_plan`) supplies intent (`execution_hint`) and force policy; lithe emits/caches (L-1 §4.5). Callers that
   want the explicit interpreter path set `execute_options::path = interpreter_only` on `execute_via_interpreter` or
@@ -1649,8 +1616,8 @@ Crank execution-path note (`include/languages/crank/execute.hpp`):
 - Default `auto_select` prefers native codegen for CFG-heavy or larger physical MIR and keeps interpreter for small
   straight-line MIR.
 - `jit_preferred` requests native first while preserving a safe interpreter fallback when native is unavailable.
-- `execute_via_interpreter` is the intelligent local-execution front door: with the default `auto_select` it follows
-  the same native-versus-interpreter policy as `execute_physical`; callers that require the interpreter set
+- `execute_via_interpreter` is the intelligent local-execution front door: with the default `auto_select` it follows the
+  same native-versus-interpreter policy as `execute_physical`; callers that require the interpreter set
   `interpreter_only` explicitly.
 - `execute_physical_native` uses a digest-keyed in-process artifact cache so repeated calls of equivalent physical MIR
   reuse the compiled native artifact.
@@ -1665,10 +1632,10 @@ Crank execution-path note (`include/languages/crank/execute.hpp`):
   register. This avoids an otherwise redundant temporary-to-destination move for argument loads, immediates, scalar
   arithmetic, comparisons, and simple loads; spill definitions retain their explicit store path.
 
-**Status.** crank's `execute`/`aot` layer previously lowered + verified then ran the
-interpreter, caching only a fingerprint (not native code). As of this implementation,
-`compile_and_cache` calls `lithe::execution::compile` so the native JIT path is active
-when asmjit is available. See design `scratch/lithe/perf-l1-interpreter-vs-aot.md` §4–5.
+**Status.** crank's `execute`/`aot` layer previously lowered + verified then ran the interpreter, caching only a
+fingerprint (not native code). As of this implementation,
+`compile_and_cache` calls `lithe::execution::compile` so the native JIT path is active when asmjit is available. See
+design `scratch/lithe/perf-l1-interpreter-vs-aot.md` §4–5.
 
 ---
 
@@ -1678,16 +1645,16 @@ when asmjit is available. See design `scratch/lithe/perf-l1-interpreter-vs-aot.m
 
 ### Overview
 
-MIR v2 adds a **structured high-level MIR** layer above the existing flat register MIR.
-Two distinct types enforce progressive lowering at compile time:
+MIR v2 adds a **structured high-level MIR** layer above the existing flat register MIR. Two distinct types enforce
+progressive lowering at compile time:
 
 | Type                         | Phase                     |
 |------------------------------|---------------------------|
 | `hl::hl_mir_function`        | Structured (pre-lowering) |
 | `mir::physical_mir_function` | Flat register MIR         |
 
-Lowering is one-way: `hl::coordinate_lowering_pass` converts `hl_mir_function → physical_mir_function`.
-After lowering all existing passes and backends work unchanged.
+Lowering is one-way: `hl::coordinate_lowering_pass` converts `hl_mir_function → physical_mir_function`. After lowering
+all existing passes and backends work unchanged.
 
 ### Key Types
 
@@ -1720,12 +1687,10 @@ auto m = memref_type::row_major(abstract_value_kind::floating, 64, 2, {1024, 102
 
 #### `loop_legality_summary`
 
-`summarize_loop_legality(loop)` derives reusable facts for optimizers and
-backends without enlarging persisted HL-MIR. It reports canonical counted-loop
-and trip-count facts, memory read/write counts, contiguity, static shape,
-minimum alignment, uniform element type, reductions, control flow, and a
-conservative possible in-place dependency. `device::kernel_plan` retains this
-summary so device emitters consume the same legality result as HL passes.
+`summarize_loop_legality(loop)` derives reusable facts for optimizers and backends without enlarging persisted HL-MIR.
+It reports canonical counted-loop and trip-count facts, memory read/write counts, contiguity, static shape, minimum
+alignment, uniform element type, reductions, control flow, and a conservative possible in-place dependency.
+`device::kernel_plan` retains this summary so device emitters consume the same legality result as HL passes.
 
 #### `task_decomposition_plan`
 
@@ -1752,127 +1717,102 @@ All passes are structs with `run()` — no `std::function`, no virtuals.
 | `pre_header_isolation`       | Split blocks so every `structured_for` is the sole op in its enclosing block; prerequisite for safe `region_fusion_pass`                                                                                                      |
 | `region_fusion_pass`         | Fuse two equal-bound `structured_for` ops (O(1) intrusive-list splice)                                                                                                                                                        |
 | `loop_tiling_pass`           | Tile a `structured_for` into outer+inner nest                                                                                                                                                                                 |
-| `vectorization_pass`         | Conservatively identifies canonical rank-1 parallel loops with compatible layout/alignment; never upgrades a memref's declared alignment                                                                                         |
+| `vectorization_pass`         | Conservatively identifies canonical rank-1 parallel loops with compatible layout/alignment; never upgrades a memref's declared alignment                                                                                      |
 | `coordinate_lowering_pass`   | HL → flat: expand loops + memref address arithmetic; sub-byte (`elem_bits < 8`) elements use bit-offset arithmetic + read-modify-write masking; MLIR-style `block_args` lowered to fresh physical registers via `ssa_to_preg` |
 | `task_plan_extraction_pass`  | Extract `task_decomposition_plan` from `is_parallel` ops                                                                                                                                                                      |
 
 At physical MIR `mir_opt_level::O2` runs the verified scalar cleanup sequence:
-unreachable-block elimination, jump threading, strict loop-preheader
-normalization, conservative loop-invariant motion, affine induction strength
-reduction, constant propagation, copy propagation, common-subexpression
-elimination, dead-definition elimination, and peephole cleanup. The default remains `O0`; users opt in through
-`codegen_options::with_mir_opt_level(mir_opt_level::O2)` or supply their own
-pipeline.
+unreachable-block elimination, jump threading, strict loop-preheader normalization, conservative loop-invariant motion,
+affine induction strength reduction, constant propagation, copy propagation, common-subexpression elimination,
+dead-definition elimination, and peephole cleanup. The default remains `O0`; users opt in through
+`codegen_options::with_mir_opt_level(mir_opt_level::O2)` or supply their own pipeline.
 
-Preheaders are formed only by redirecting proven external CFG edges, and never
-when header arguments or phi placeholders would require repair. LICM hoists
-single-definition integer `load_imm`, move, arithmetic, and bitwise operations
-only when every register operand is loop-invariant. Division, remainder,
-shifts, floating-point operations, calls, and stores remain in place. A
-physical load moves only when a lowering supplies an `invariant_load_motion_proof`
-for that exact instruction: invariant base/index, non-trapping access, and
-either no loop writes or writes proven disjoint. The default proof is `unknown`,
-which leaves the load in place at zero extra cost.
+Preheaders are formed only by redirecting proven external CFG edges, and never when header arguments or phi placeholders
+would require repair. LICM hoists single-definition integer `load_imm`, move, arithmetic, and bitwise operations only
+when every register operand is loop-invariant. Division, remainder, shifts, floating-point operations, calls, and stores
+remain in place. A physical load moves only when a lowering supplies an `invariant_load_motion_proof`
+for that exact instruction: invariant base/index, non-trapping access, and either no loop writes or writes proven
+disjoint. The default proof is `unknown`, which leaves the load in place at zero extra cost.
 
-Structured lowering also records optional canonical-loop and affine-address
-descriptors. O2 uses them for pointer-induction strength reduction for an
-invariant base and exact `base + (iv * stride)` address form, including signed
-non-zero starts, steps, strides, and lowering-supplied invariant byte offsets
-when derived byte offsets are representable.
-Multiple independent addresses receive independent pointer inductions; every
-unproven, malformed, or overflowing descriptor retains its original MIR.
+Structured lowering also records optional canonical-loop and affine-address descriptors. O2 uses them for
+pointer-induction strength reduction for an invariant base and exact `base + (iv * stride)` address form, including
+signed non-zero starts, steps, strides, and lowering-supplied invariant byte offsets when derived byte offsets are
+representable. Multiple independent addresses receive independent pointer inductions; every unproven, malformed, or
+overflowing descriptor retains its original MIR.
 
-`vector_polyhedral_planning_pass` is an opt-in HL-MIR analysis pass. It emits
-target-neutral `vector_plan` records containing lanes, element width, alignment,
-tail strategy, reduction shape, legality, the extracted affine schedule, and an
-explicit scalar fallback. A schedule is materialized only for a proven affine,
-contiguous, non-dependent, sufficiently large loop. Unknown dynamic bounds and
-unsupported reductions retain the structured scalar path; no vector opcode or
-target dependency is introduced into HL-MIR.
+`vector_polyhedral_planning_pass` is an opt-in HL-MIR analysis pass. It emits target-neutral `vector_plan` records
+containing lanes, element width, alignment, tail strategy, reduction shape, legality, the extracted affine schedule, and
+an explicit scalar fallback. A schedule is materialized only for a proven affine, contiguous, non-dependent,
+sufficiently large loop. Unknown dynamic bounds and unsupported reductions retain the structured scalar path; no vector
+opcode or target dependency is introduced into HL-MIR.
 
-`select_execution_plan` is the opt-in, deterministic Phase-D selector. Callers
-provide provider availability and setup/per-work-item costs for interpreter,
-JIT, SIMD, Metal, and Vulkan; Lithe applies legality gates, explicit overrides,
-overflow-safe cost arithmetic, and a scalar fallback. The event path is a
-compile-time template switch: `Observe=false` emits nothing and stores nothing;
-`Observe=true` forwards a POD `execution_selection_event` to an existing Nadi-
-compatible observer. Provider discovery, device handles, and benchmark storage
-remain outside the portable core.
+`select_execution_plan` is the opt-in, deterministic Phase-D selector. Callers provide provider availability and
+setup/per-work-item costs for interpreter, JIT, SIMD, Metal, and Vulkan; Lithe applies legality gates, explicit
+overrides, overflow-safe cost arithmetic, and a scalar fallback. The event path is a compile-time template switch:
+`Observe=false` emits nothing and stores nothing;
+`Observe=true` forwards a POD `execution_selection_event` to an existing Nadi- compatible observer. Provider discovery,
+device handles, and benchmark storage remain outside the portable core.
 
 Selection results now expose explicit `selected_reason` and `fallback_reason`
-strings, and `execution_selection_event` carries both fields. This keeps static
-Nadi decision telemetry reason-coded without introducing backend headers or
-runtime type erasure into selector code.
+strings, and `execution_selection_event` carries both fields. This keeps static Nadi decision telemetry reason-coded
+without introducing backend headers or runtime type erasure into selector code.
 
-`lithe_execution_benchmark.hpp` is an opt-in fixture for equivalent provider
-workloads. `measure_provider` records cold compilation separately from warmed
-execution samples and stops on the first failed equivalence predicate. It does
-not select a provider, retain artifacts, or run as part of normal execution.
-`record_measurement` is a separate opt-in adapter that converts only equivalent
-warm samples into the existing feedback store, making them available to an
-adaptive cost model without making benchmark collection part of compilation.
-`calibrate_candidate_cost` is the complementary pure adapter: it returns an
-explicit warm-cache candidate cost from an equivalent benchmark measurement,
-leaving feedback storage and automatic selection under the caller's control.
+`lithe_execution_benchmark.hpp` is an opt-in fixture for equivalent provider workloads. `measure_provider` records cold
+compilation separately from warmed execution samples and stops on the first failed equivalence predicate. It does not
+select a provider, retain artifacts, or run as part of normal execution.
+`record_measurement` is a separate opt-in adapter that converts only equivalent warm samples into the existing feedback
+store, making them available to an adaptive cost model without making benchmark collection part of compilation.
+`calibrate_candidate_cost` is the complementary pure adapter: it returns an explicit warm-cache candidate cost from an
+equivalent benchmark measurement, leaving feedback storage and automatic selection under the caller's control.
 
 The benchmark record includes an explicit `benchmark_scope` (`full_path` or
-`direct_entry`) and a `phase_timing_record` so compile, install, transfer,
-allocation, and warm execution timings remain independently reportable.
+`direct_entry`) and a `phase_timing_record` so compile, install, transfer, allocation, and warm execution timings remain
+independently reportable.
 
-`execution_cost_input` keeps selection deterministic while representing the
-actual workload: work items, data bytes, device-transfer bytes, cache state,
-and access locality. Per-provider costs may distinguish cold from warm setup,
-streaming from reusable data-byte work, and accelerator transfer. Provider
-availability remains a caller-supplied fact, so portable Lithe does not include or probe Metal,
-Vulkan, or JIT facilities merely to rank candidates.
+`execution_cost_input` keeps selection deterministic while representing the actual workload: work items, data bytes,
+device-transfer bytes, cache state, and access locality. Per-provider costs may distinguish cold from warm setup,
+streaming from reusable data-byte work, and accelerator transfer. Provider availability remains a caller-supplied fact,
+so portable Lithe does not include or probe Metal, Vulkan, or JIT facilities merely to rank candidates.
 
-Optional backend adapters convert SIMD, Metal, and Vulkan plan bindings into
-pure `execution_backend_admission` values. The selector remains backend-free;
-admission updates only the matching candidate. `make_execution_fallback_chain`
-exposes the macOS order Metal, Vulkan, SIMD, JIT, interpreter for a selected
-provider. A caller may set `force_requires_success` when a forced provider must
-report failure rather than use a fallback.
+Optional backend adapters convert SIMD, Metal, and Vulkan plan bindings into pure `execution_backend_admission` values.
+The selector remains backend-free; admission updates only the matching candidate. `make_execution_fallback_chain`
+exposes the macOS order Metal, Vulkan, SIMD, JIT, interpreter for a selected provider. A caller may set
+`force_requires_success` when a forced provider must report failure rather than use a fallback.
 
-At the execution layer, `lithe::algorithms::backend_capability_info` also
-accepts an optional `admission` value (`provider`, `plan_admitted`,
-`provider_available`, `reason`). When present, the cost-based selector rejects
-that candidate with the same reason code before normal availability/capability
-gates, keeping selector logic backend-neutral while preserving explicit fallback
+At the execution layer, `lithe::algorithms::backend_capability_info` also accepts an optional `admission` value
+(`provider`, `plan_admitted`,
+`provider_available`, `reason`). When present, the cost-based selector rejects that candidate with the same reason code
+before normal availability/capability gates, keeping selector logic backend-neutral while preserving explicit fallback
 diagnostics.
 
 The Highway SIMD backend consumes a proven `vector_plan` through
-`bind_vector_plan`. It accepts only materialized f32 elementwise plans with a
-whole-vector or scalar-epilogue tail, then maps the target-neutral plan to the
-native Highway lane count. Every other plan returns an explicit scalar-fallback
+`bind_vector_plan`. It accepts only materialized f32 elementwise plans with a whole-vector or scalar-epilogue tail, then
+maps the target-neutral plan to the native Highway lane count. Every other plan returns an explicit scalar-fallback
 binding; no physical MIR is silently reinterpreted as vector code.
 
-`lower_vector_plan_for_simd` and `execute_simd_binary` provide the typed f32
-add/multiply execution path for admitted plans. They require equal input/output
-extents and honor the proven tail mode. Rejected plans, extent mismatch, or an
+`lower_vector_plan_for_simd` and `execute_simd_binary` provide the typed f32 add/multiply execution path for admitted
+plans. They require equal input/output extents and honor the proven tail mode. Rejected plans, extent mismatch, or an
 invalid whole-vector tail invoke a statically-bound scalar fallback.
 
-`simd_kernels` also provides typed `reduce_sum` kernels for `float`, `double`,
-and `int32_t`. `lower_vector_reduction_plan_for_simd` and
-`execute_simd_reduction` expose planned horizontal reduction with the same
-explicit scalar-fallback behavior used by binary elementwise paths.
+`simd_kernels` also provides typed `reduce_sum` kernels for `float`, `double`, and `int32_t`.
+`lower_vector_reduction_plan_for_simd` and
+`execute_simd_reduction` expose planned horizontal reduction with the same explicit scalar-fallback behavior used by
+binary elementwise paths.
 
 The native Metal path consumes the same `vector_plan` through
-`bind_vector_plan_for_metal`. It first rejects plans that are not proven,
-materialized f32 elementwise work, then checks native Metal availability. Its
-binding supports whole-vector, scalar-epilogue, and masked tails; all other
-plans retain an explicit fallback decision. Binding does not emit a kernel or
-retain a device handle, so it remains an optional backend-only operation.
+`bind_vector_plan_for_metal`. It first rejects plans that are not proven, materialized f32 elementwise work, then checks
+native Metal availability. Its binding supports whole-vector, scalar-epilogue, and masked tails; all other plans retain
+an explicit fallback decision. Binding does not emit a kernel or retain a device handle, so it remains an optional
+backend-only operation.
 `lower_vector_plan_for_metal` carries that admitted plan and a non-owning
-`device::kernel_plan` into the existing MSL emitter. It refuses emission unless
-both contracts agree, so vector admission cannot bypass the device ABI.
+`device::kernel_plan` into the existing MSL emitter. It refuses emission unless both contracts agree, so vector
+admission cannot bypass the device ABI.
 
 Vulkan and MoltenVK consume the same plan through
-`bind_vector_plan_for_vulkan(vector_plan, kernel_plan)`. The binding is portable
-and does not create a Vulkan device: it accepts only proven, materialized f32
-elementwise work which also satisfies the existing SPIR-V ABI (two readable,
-one writable, rank-1 contiguous bindings). A compatible binding may proceed to
-optional provider installation; an unavailable device or failed installation
-retains the explicit fallback path.
+`bind_vector_plan_for_vulkan(vector_plan, kernel_plan)`. The binding is portable and does not create a Vulkan device: it
+accepts only proven, materialized f32 elementwise work which also satisfies the existing SPIR-V ABI (two readable, one
+writable, rank-1 contiguous bindings). A compatible binding may proceed to optional provider installation; an
+unavailable device or failed installation retains the explicit fallback path.
 
 **Pass composition helper:**
 
@@ -1916,9 +1856,8 @@ interpreter  asmjit
 
 ## Language-Control Extension (`lithe::ir::hl`, `lithe::ir::frontend`)
 
-The **Language-Control Extension** evolves the HL MIR from a compute-oriented
-kernel IR into a full **portable language-level control/effect IR**. It is
-introduced across five additive schema minor versions (1.1.0–1.5.0) and is
+The **Language-Control Extension** evolves the HL MIR from a compute-oriented kernel IR into a full **portable
+language-level control/effect IR**. It is introduced across five additive schema minor versions (1.1.0–1.5.0) and is
 documented normatively in `docs/lithe/lithe-ir-spec.md §8.2 / §14.6`.
 
 ### Four-Layer Model
@@ -1939,18 +1878,15 @@ Portable module   (portable_module / canonical_encode / semantic_digest)
 Durable bytes     (filesystem_blob_store + memory_catalog/petika_catalog)
 ```
 
-The live form uses C++ enums and structs (arena-backed, in-process only).
-The wire form uses string-keyed `(domain, name)` opcode identity and
+The live form uses C++ enums and structs (arena-backed, in-process only). The wire form uses string-keyed
+`(domain, name)` opcode identity and
 `std::optional<…>` attr payloads (serialisable, schema-stable).
 
-`codec.hpp` is the lossless persistence boundary. It encodes every module,
-function, region, block, operation, value, and optional attribute field with
-explicit little-endian lengths and limits. `decode_portable()` checks the
-format magic/version, enforces allocation limits, rejects trailing data, and
-runs `verify_portable()` before returning by default. The resulting bytes are
-the payload stored by the existing content-addressed artifact store; catalog
-keys continue to include semantic, ABI, pipeline, target, policy, and symbol
-fingerprints as appropriate.
+`codec.hpp` is the lossless persistence boundary. It encodes every module, function, region, block, operation, value,
+and optional attribute field with explicit little-endian lengths and limits. `decode_portable()` checks the format
+magic/version, enforces allocation limits, rejects trailing data, and runs `verify_portable()` before returning by
+default. The resulting bytes are the payload stored by the existing content-addressed artifact store; catalog keys
+continue to include semantic, ABI, pipeline, target, policy, and symbol fingerprints as appropriate.
 
 ### Schema Minors and the Ops They Add
 
@@ -2036,8 +1972,8 @@ ok_bb:
 
 ### Stable String Tables
 
-All predicate, guard-kind, trap-kind, policy, and isolation index fields in
-wire attr payloads MUST use the canonical string tables from
+All predicate, guard-kind, trap-kind, policy, and isolation index fields in wire attr payloads MUST use the canonical
+string tables from
 `include/lithe/lithe_ir/frontend/lowering_contract.hpp §9`:
 
 - `k_icmp_predicates` (10 strings)
@@ -2053,20 +1989,18 @@ Index positions are stable within a major schema version (spec §17.7).
 
 ## Runtime Foundation (`lithe::rt`)
 
-The runtime foundation is an **opt-in overlay** that layers a managed execution
-substrate on top of `lithe::codegen` and `lithe::runtime` without modifying
-either. It lives in the new namespace `lithe::rt`, ships as header-only C++23,
-and is aggregated by a single opt-in header:
+The runtime foundation is an **opt-in overlay** that layers a managed execution substrate on top of `lithe::codegen` and
+`lithe::runtime` without modifying either. It lives in the new namespace `lithe::rt`, ships as header-only C++23, and is
+aggregated by a single opt-in header:
 
 ```cpp
 #include "lithe/lithe_rt.hpp"   // NOT pulled in by lithe/lithe.hpp
 ```
 
-Core Lithe users pay nothing for it — `lithe/lithe.hpp` does not include it. The
-foundation implements the shared execution foundation, the managed-heap / GC
-layer (M1), roots + safepoints (M2), the compile/invoke engine (M3), and
-language exceptions (M4). Deoptimization, JIT tiering, AOT containers, and the
-out-of-process sandbox build on this substrate in later passes (M5+).
+Core Lithe users pay nothing for it — `lithe/lithe.hpp` does not include it. The foundation implements the shared
+execution foundation, the managed-heap / GC layer (M1), roots + safepoints (M2), the compile/invoke engine (M3), and
+language exceptions (M4). Deoptimization, JIT tiering, AOT containers, and the out-of-process sandbox build on this
+substrate in later passes (M5+).
 
 ### Execution Layer — foundations
 
@@ -2109,11 +2043,10 @@ lithe_rt/* (M1–M4)                  ← managed runtime (GC, roots, engine, ex
 - P0A managed-runtime invariants: root-relocation, finalizer ownership, safepoint stop/resume, `managed_frame_guard`
   active-frame accounting, exception/unwind ownership, and retirement invariants are **asserted and documented** in
   `lithe_rt/*`.
-- P0B: native executable-code installation remains quarantined behind typed
-  backend resources; `compile()` never treats heap bytes as executable memory.
-  `managed_function::invoke()` executes only a bound erased managed invoker,
-  establishes a `managed_frame_guard`, accounts active frames, validates arity
-  and dynamic argument types, and converts host exceptions to structured traps.
+- P0B: native executable-code installation remains quarantined behind typed backend resources; `compile()` never treats
+  heap bytes as executable memory.
+  `managed_function::invoke()` executes only a bound erased managed invoker, establishes a `managed_frame_guard`,
+  accounts active frames, validates arity and dynamic argument types, and converts host exceptions to structured traps.
   Raw entry cells remain non-callable. `engine_integration.hpp` owns the typed
   `execution::typed_entry` lease for interpreter and AsmJIT resources.
 
@@ -2266,8 +2199,8 @@ Retirement drain counts live fences like live frames.
 **MoltenVK log level (macOS):** on first device bring-up (`VkContext::create`, before `vkCreateInstance`) the backend
 sets `MVK_CONFIG_LOG_LEVEL=1` (errors only), suppressing MoltenVK's info/warning spam — the driver banner, the full
 supported-extension list, and the per-device capability dump. `setenv` uses `overwrite=0`, so a user-exported
-`MVK_CONFIG_LOG_LEVEL` always wins. Whichever Vulkan instance is created first (lithe device backend or the pravaha
-GPU backend) applies the level; both apply the same guard so ordering is irrelevant.
+`MVK_CONFIG_LOG_LEVEL` always wins. Whichever Vulkan instance is created first (lithe device backend or the pravaha GPU
+backend) applies the level; both apply the same guard so ordering is irrelevant.
 
 **SPIR-V IR adapter** (`backends/lithe_codegen_vulkan_spirv_ir.hpp`): `spirv_module` + `spirv_ir_provider`. Structural
 `validate_ir` checks: magic word `0x07230203`, presence of `OpEntryPoint`, `OpExecutionMode LocalSize`, and
@@ -2306,17 +2239,15 @@ not redundant; they carry MIR-pass-level diagnostics that the execution layer wr
 
 ### Design mandate: one shared metadata system
 
-The central decision is that stack maps, deopt state, code versioning, artifact
-metadata, and resource ownership are **one shared metadata system** rather than
-independent per-feature side tables that drift apart. `code_version_metadata`
-is that system — every later runtime service (GC relocation, deopt, hot
-replacement, AOT serialization, JIT tiering) reads and writes THIS struct.
+The central decision is that stack maps, deopt state, code versioning, artifact metadata, and resource ownership are
+**one shared metadata system** rather than independent per-feature side tables that drift apart. `code_version_metadata`
+is that system — every later runtime service (GC relocation, deopt, hot replacement, AOT serialization, JIT tiering)
+reads and writes THIS struct.
 
 ### Headers
 
 The overlay is a set of cohesive headers under `lithe/lithe_rt/`, plus the single
-`lithe/lithe_rt.hpp` entry (sibling of `lithe/lithe.hpp`) that aggregates them in
-dependency order:
+`lithe/lithe_rt.hpp` entry (sibling of `lithe/lithe.hpp`) that aggregates them in dependency order:
 
 | Header                            | Provides                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 |-----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -2327,13 +2258,12 @@ dependency order:
 | `lithe_rt/instance.hpp`           | `runtime_instance` (owning root, `enable_shared_from_this` shared factory `create()`), `execution_profile`, `profile_defaults`, `trap_manager`, `security_policy`. Language exceptions: immutable `handler_table` (finalize-then-frozen), stable `handler_id`, two-phase unwind (`search_phase` / `cleanup_phase`), the landing-pad ABI, and `guard_foreign_boundary`.                                                                                                                                                                                                                                                                                                          |
 | `lithe_rt/engine.hpp`             | Out-of-line `rooted_ref` / `thread_attachment` members (runtime_instance now complete), the `compile()` MIR pipeline (annotate → verify → lower → install), and the `managed_function` executable handle.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `lithe_rt/engine_integration.hpp` | `managed_entry_adapter<Sig>` and `managed_integration_context<Sig>` — bridges the static engine's `typed_entry<Sig>` to the managed runtime's `span<const runtime_value>` calling convention.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `lithe_rt.hpp`                    | Opt-in aggregate including the parts in dependency order (`foundation` → `heap` → `execution` → `code_metadata` → `instance` → `engine` → `engine_integration`). NOT included by `lithe/lithe.hpp`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `lithe_rt.hpp`                    | Opt-in aggregate including the parts in dependency order (`foundation` → `heap` → `execution` → `code_metadata` → `instance` → `engine` → `engine_integration`). NOT included by `lithe/lithe.hpp`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ### Typed-MIR value model
 
-`typed_value` classifies a MIR SSA value beyond the existing kinds — the
-signed/unsigned distinction, raw vs managed pointers, base vs derived managed
-pointers, host vs guest pointers, and value-role flags (exception / deopt /
+`typed_value` classifies a MIR SSA value beyond the existing kinds — the signed/unsigned distinction, raw vs managed
+pointers, base vs derived managed pointers, host vs guest pointers, and value-role flags (exception / deopt /
 safepoint). `classify()` and `to_abstract()` bridge to the existing
 `codegen::abstract_value_type` so nothing downstream breaks.
 
@@ -2346,33 +2276,30 @@ auto tv = lithe::rt::classify(t);   // pclass == managed_derived; is_derived()
 
 ### Unified traps
 
-Every runtime fault is one structured `trap` carrying `trap_code`, function id,
-code version, MIR instruction, machine offset, source location, and an optional
-exception payload. `std::expected<T, trap>` is the runtime result convention.
+Every runtime fault is one structured `trap` carrying `trap_code`, function id, code version, MIR instruction, machine
+offset, source location, and an optional exception payload. `std::expected<T, trap>` is the runtime result convention.
 `may_trap_kinds(opcode)` maps each trapping opcode to its trap set (e.g. `div`
 → `division_by_zero` + `integer_overflow`; `load` → `out_of_bounds` +
 `null_reference`).
 
 ### `generational_gc`
 
-The production collector (aliased `heap_manager`) drives root scanning through
-the safepoint layer and satisfies the shared safepoint anchor.
+The production collector (aliased `heap_manager`) drives root scanning through the safepoint layer and satisfies the
+shared safepoint anchor.
 
 - Copying young generation (semispaces, Cheney scan) + mark-sweep old generation.
 - Large-object space (direct allocation, never copied).
 - **Object-level remembered set** for old→young references, driven by
   `write_barrier(container, slot, value)` — not an absolute-address card table.
-- Weak references (RAII `weak_handle`, stable u64 id, cleared on collect),
-  two-cycle finalizers, object pinning (`pin` / `allocate_pinned`).
+- Weak references (RAII `weak_handle`, stable u64 id, cleared on collect), two-cycle finalizers, object pinning (`pin` /
+  `allocate_pinned`).
 - Age-based promotion, allocation / heap-size limits, `stats()`.
 - **Checked object sizing** with overflow detection; `gc_header` caches
-  `total_size` + `payload_offset`. Owning `heap_region` is move-only; the
-  collector itself is non-movable.
-- `collect(collection_reason)` returns `std::expected<void, trap>` — a failed
-  collection surfaces a structured trap rather than aborting.
+  `total_size` + `payload_offset`. Owning `heap_region` is move-only; the collector itself is non-movable.
+- `collect(collection_reason)` returns `std::expected<void, trap>` — a failed collection surfaces a structured trap
+  rather than aborting.
 
-Allocation returns a **rooted handle**, so a value is protected from collection
-the instant it exists:
+Allocation returns a **rooted handle**, so a value is protected from collection the instant it exists:
 
 ```cpp
 auto rt = lithe::rt::runtime_instance::create(          // expected<shared_ptr, trap>
@@ -2386,12 +2313,12 @@ auto rc  = (*rt)->heap().collect(
 ### Roots, threads, and safepoints (M2)
 
 `rooted_ref` is a move-only RAII handle backed by `root_slot_table` (a
-`std::deque` of stable slots the collector rewrites on relocation). A host
-attaches with `attach_current_thread()` → `thread_attachment`, giving a
-`thread_context` (phase, machine frame, host roots, in-flight exception, fuel).
-The `safepoint_coordinator` runs stop-the-world with a single-thread fast path;
-`machine_root_location` / `register_save_area` describe where live references
-sit in machine registers or stack slots at a safepoint. All of M2 lives in
+`std::deque` of stable slots the collector rewrites on relocation). A host attaches with `attach_current_thread()` →
+`thread_attachment`, giving a
+`thread_context` (phase, machine frame, host roots, in-flight exception, fuel). The `safepoint_coordinator` runs
+stop-the-world with a single-thread fast path;
+`machine_root_location` / `register_save_area` describe where live references sit in machine registers or stack slots at
+a safepoint. All of M2 lives in
 `lithe_rt/execution.hpp`.
 
 ### Compile + invoke (M3)
@@ -2399,12 +2326,12 @@ sit in machine registers or stack slots at a safepoint. All of M2 lives in
 `compile(rt, physical_mir_function)` runs the managed MIR pipeline —
 `annotate_managed_mir` (type propagation) → `verify_managed_mir` →
 `lower_managed_mir` (fast-path + thunk-call plans) — then installs an owning
-`code_resource` and returns a `managed_function`. Managed extension operations
-ride the existing MIR via `operation_id{"lithe.rt", …}` with a
-`managed_mir_annotations` side table, so no new MIR opcodes are added. Generated
-code calls back through stable thunks (`rt_allocate`, `rt_write_barrier`,
-`rt_safepoint`, `rt_throw`, `rt_raise_trap`). MIR passes and runtime thunks live
-in `lithe_rt/code_metadata.hpp`; the `compile()` entry point in `lithe_rt/engine.hpp`.
+`code_resource` and returns a `managed_function`. Managed extension operations ride the existing MIR via
+`operation_id{"lithe.rt", …}` with a
+`managed_mir_annotations` side table, so no new MIR opcodes are added. Generated code calls back through stable thunks
+(`rt_allocate`, `rt_write_barrier`,
+`rt_safepoint`, `rt_throw`, `rt_raise_trap`). MIR passes and runtime thunks live in `lithe_rt/code_metadata.hpp`; the
+`compile()` entry point in `lithe_rt/engine.hpp`.
 
 ```cpp
 auto fn = lithe::rt::compile(**rt, mir);                // expected<managed_function, trap>
@@ -2412,19 +2339,15 @@ auto thread = (*rt)->attach_current_thread();           // expected<thread_attac
 auto result = fn->invoke(*thread, args);                // expected<runtime_value, trap>
 ```
 
-For the complete local path, explicitly include `lithe/lithe_local_engine.hpp`.
-It stays out of the lighter runtime aggregate so storage and optimizer headers
-remain pay-for-use. `local_lithe_engine` owns backend
-selection and composes compile → install → typed-entry acquisition → managed
-binding → invocation. Callers no longer need to invoke `bind_managed_entry`
-manually. A signature-aware physical-MIR fingerprint keys a bounded LRU of
-resident managed functions (512 entries by default). Compilation uses per-key
-single-flight coordination: requests for the same function wait for and reuse
-one result, while unrelated functions compile independently. Eviction first
-marks code `retiring`; code with active frames enters the retirement queue, and
-unwind/root metadata is unregistered only when reclamation is safe. Capacity,
-hit, miss, eviction, pending-retirement, explicit eviction, and drain APIs are
-available on the façade:
+For the complete local path, explicitly include `lithe/lithe_local_engine.hpp`. It stays out of the lighter runtime
+aggregate so storage and optimizer headers remain pay-for-use. `local_lithe_engine` owns backend selection and composes
+compile → install → typed-entry acquisition → managed binding → invocation. Callers no longer need to invoke
+`bind_managed_entry`
+manually. A signature-aware physical-MIR fingerprint keys a bounded LRU of resident managed functions (512 entries by
+default). Compilation uses per-key single-flight coordination: requests for the same function wait for and reuse one
+result, while unrelated functions compile independently. Eviction first marks code `retiring`; code with active frames
+enters the retirement queue, and unwind/root metadata is unregistered only when reclamation is safe. Capacity, hit,
+miss, eviction, pending-retirement, explicit eviction, and drain APIs are available on the façade:
 
 ```cpp
 lithe::local_lithe_engine engine{
@@ -2439,58 +2362,49 @@ auto misses = engine.managed_cache_misses();
 auto evictions = engine.managed_cache_evictions();
 ```
 
-The same `compile_managed<Sig>` and `compile_and_invoke<Sig>` overloads accept
-live `hl_mir_function` values. They execute the complete portable path — freeze,
-deterministic optimization/cache, verified decode, thaw, coordinate lowering,
-managed compilation, backend selection, binding, and invocation. Top-level HL
+The same `compile_managed<Sig>` and `compile_and_invoke<Sig>` overloads accept live `hl_mir_function` values. They
+execute the complete portable path — freeze, deterministic optimization/cache, verified decode, thaw, coordinate
+lowering, managed compilation, backend selection, binding, and invocation. Top-level HL
 `argument` and result-carrying `region_yield`/`ret` operations lower to physical
 `load_arg` and `ret` instructions.
 
-The façade also exposes `portable_cache()`. `load_or_optimize()` derives a key
-from source semantic identity, schema, ABI, pipeline version, and semantic
-policy; runs deterministic portable optimization only on a miss; atomically
-publishes the encoded module; checks host compatibility; verifies the payload
-semantic digest; and decodes it. `freeze_optimize_thaw()` supplies the complete
-live-HL-MIR persistence round trip. A missing, corrupt, or digest-mismatched blob
-evicts its catalog row and is rebuilt once.
+The façade also exposes `portable_cache()`. `load_or_optimize()` derives a key from source semantic identity, schema,
+ABI, pipeline version, and semantic policy; runs deterministic portable optimization only on a miss; atomically
+publishes the encoded module; checks host compatibility; verifies the payload semantic digest; and decodes it.
+`freeze_optimize_thaw()` supplies the complete live-HL-MIR persistence round trip. A missing, corrupt, or
+digest-mismatched blob evicts its catalog row and is rebuilt once.
 
-`target_cache()` is the provider boundary for target-local artifacts. The caller
-supplies compile, encode, and decode functions plus stable backend, target,
-pipeline, specialization, symbol-resolution, and compatibility fingerprints.
-Only owned encoded bytes are published, and every hit is reconstructed through
-the decoder; live JIT handles and process-local pointers are never stored.
+`target_cache()` is the provider boundary for target-local artifacts. The caller supplies compile, encode, and decode
+functions plus stable backend, target, pipeline, specialization, symbol-resolution, and compatibility fingerprints. Only
+owned encoded bytes are published, and every hit is reconstructed through the decoder; live JIT handles and
+process-local pointers are never stored.
 
-The managed-call ABI uses a versioned `managed_signature_descriptor`. Supported
-types are `i64`, `f64`, `bool`, raw pointers, `object_ref`, relocation-safe
-`managed_handle`, function references, and explicit `void_value`. Object
-arguments are rooted at the managed boundary and exposed to the adapter through
-root slots. Code that retains a reference across a safepoint should accept a
-`managed_handle`, whose slot is rewritten by the collector. Invocation also
-links a `machine_frame`, rejects threads from another runtime, and restores the
-frame and managed-depth state on every exit.
+The managed-call ABI uses a versioned `managed_signature_descriptor`. Supported types are `i64`, `f64`, `bool`, raw
+pointers, `object_ref`, relocation-safe
+`managed_handle`, function references, and explicit `void_value`. Object arguments are rooted at the managed boundary
+and exposed to the adapter through root slots. Code that retains a reference across a safepoint should accept a
+`managed_handle`, whose slot is rewritten by the collector. Invocation also links a `machine_frame`, rejects threads
+from another runtime, and restores the frame and managed-depth state on every exit.
 
 ### Exceptions (M4)
 
 The exception layer is correctness-first: the in-flight payload is a **GC root**
-for the whole throw→catch window (its type is derived from `payload.layout_id`,
-never a separate field). Handler metadata is **finalized before install** —
-`handler_table::finalize()` precomputes each handler's innermost→outermost
-cleanup chain and freezes the table, so dispatch and unwinding never allocate.
-Unwinding is two-phase: `search_phase` records the target catch + cleanups
-without running code; `cleanup_phase` runs cleanups then transfers to the
-landing pad via the explicit ABI `(runtime_instance*, thread_context*,
-object_ref, handler_id)`. A new exception raised in a cleanup **replaces** the
-original (policy D2). `guard_foreign_boundary` wraps host callbacks, converting
+for the whole throw→catch window (its type is derived from `payload.layout_id`, never a separate field). Handler
+metadata is **finalized before install** —
+`handler_table::finalize()` precomputes each handler's innermost→outermost cleanup chain and freezes the table, so
+dispatch and unwinding never allocate. Unwinding is two-phase: `search_phase` records the target catch + cleanups
+without running code; `cleanup_phase` runs cleanups then transfers to the landing pad via the explicit ABI `(runtime_instance*, thread_context*,
+object_ref, handler_id)`. A new exception raised in a cleanup **replaces** the original (policy D2).
+`guard_foreign_boundary` wraps host callbacks, converting
 `std::exception` / `(...)` into a structured trap. Exception types live in
 `lithe_rt/instance.hpp`.
 
 ### Execution profiles
 
 `execution_profile` selects safe defaults via `profile_defaults`. The
-`untrusted_sandbox` profile forces verification, bounds checks, fuel, W^X, import
-restriction, guest memory model, and host-pointer forbidding on — and it
-**cannot** be relaxed by a caller. `runtime_instance::create()` refuses to start
-if a profile-required control cannot be enforced.
+`untrusted_sandbox` profile forces verification, bounds checks, fuel, W^X, import restriction, guest memory model, and
+host-pointer forbidding on — and it **cannot** be relaxed by a caller. `runtime_instance::create()` refuses to start if
+a profile-required control cannot be enforced.
 
 ---
 
@@ -2670,8 +2584,8 @@ auto result = sel(backends, reqs, report_buf);
 
 ### `selection_explanation` — §5.1
 
-Structured per-backend accept/reject list. Accompanies (does not replace) `negotiation_report_buffer`.
-Reuses `diag::diagnostic` from imp-3.
+Structured per-backend accept/reject list. Accompanies (does not replace) `negotiation_report_buffer`. Reuses
+`diag::diagnostic` from imp-3.
 
 ```cpp
 selection_explanation expl;
@@ -3073,56 +2987,51 @@ The following algorithmically-grounded gaps identified in the backend analysis w
 
 ### GAP-1 — flat_opcode table completeness
 
-`coordinate_lowering_pass::flat_opcode()` previously covered only 9 opcodes.
-It now maps the complete schema 1.0–1.2 set:
+`coordinate_lowering_pass::flat_opcode()` previously covered only 9 opcodes. It now maps the complete schema 1.0–1.2
+set:
 
-| HL opcode | Flat opcode | Notes |
-|-----------|-------------|-------|
-| `sdiv` / `udiv` | `div` | Signed/unsigned both map to flat div |
-| `srem` / `urem` | `mod` | Signed/unsigned both map to flat mod |
-| `bit_and` / `bit_or` / `bit_xor` | same | Bitwise schema 1.2 |
-| `shl` | `shl` | Left shift |
-| `lshr` / `ashr` | `shr` | Both right-shift variants map to flat shr |
+| HL opcode                        | Flat opcode | Notes                                     |
+|----------------------------------|-------------|-------------------------------------------|
+| `sdiv` / `udiv`                  | `div`       | Signed/unsigned both map to flat div      |
+| `srem` / `urem`                  | `mod`       | Signed/unsigned both map to flat mod      |
+| `bit_and` / `bit_or` / `bit_xor` | same        | Bitwise schema 1.2                        |
+| `shl`                            | `shl`       | Left shift                                |
+| `lshr` / `ashr`                  | `shr`       | Both right-shift variants map to flat shr |
 
-`icmp` and `fcmp` opcodes are dispatched through attribute-aware branches
-(`compare_attr::pred`) that consult `icmp_opcode()` / `fcmp_opcode()` helpers
-rather than the generic table.
+`icmp` and `fcmp` opcodes are dispatched through attribute-aware branches (`compare_attr::pred`) that consult
+`icmp_opcode()` / `fcmp_opcode()` helpers rather than the generic table.
 
 ### GAP-2 — floating constant lowering
 
 `hl_opcode::constant` with `constant_kind::floating_point` now emits
-`opcode::fload_imm` (a direct f64 immediate load). Previously this path
-emitted a diagnostic and fell through, leaving the SSA result undefined.
+`opcode::fload_imm` (a direct f64 immediate load). Previously this path emitted a diagnostic and fell through, leaving
+the SSA result undefined.
 
 ### GAP-3+4 — AsmJIT ABI and dynamic signature
 
-- `jit_function_handle::fn_f64_t` is now `double (*)(double, double)` instead
-  of `double (*)(int64_t, int64_t)`. On AArch64 (AAPCS64 §6.8.2) doubles are
-  passed in D-registers, not X-registers; the wrong type caused silent
-  argument corruption when calling JIT-compiled f64 functions.
+- `jit_function_handle::fn_f64_t` is now `double (*)(double, double)` instead of `double (*)(int64_t, int64_t)`. On
+  AArch64 (AAPCS64 §6.8.2) doubles are passed in D-registers, not X-registers; the wrong type caused silent argument
+  corruption when calling JIT-compiled f64 functions.
 - `call_f64` parameter types updated to match: `double call_f64(double, double)`.
 - `mir_type_to_asmjit` now returns `TypeId::kFloat64` for any argument with
   `reg_class == floating` or `floating_point == true`.
 
 ### GAP-5 — SIMD double and int32_t kernels
 
-`simd_kernels` now provides `add`, `mul`, `axpy`, and `reduce_sum` overloads
-for `double` and `std::int32_t` in addition to `float`. `bind_vector_plan`
+`simd_kernels` now provides `add`, `mul`, `axpy`, and `reduce_sum` overloads for `double` and `std::int32_t` in addition
+to `float`. `bind_vector_plan`
 accepts `element_bits == 64` plans. `execute_simd_binary` is a template
-`<class T, class ScalarFallback>` supporting any of the three element types;
-a fixed-extent float overload preserves backward compatibility for existing
-call sites that pass `std::span<const float, N>`.
+`<class T, class ScalarFallback>` supporting any of the three element types; a fixed-extent float overload preserves
+backward compatibility for existing call sites that pass `std::span<const float, N>`.
 
 ### GAP-10 — SPIR-V result-id uniqueness validation
 
-`spirv_module::validate()` now performs an O(n) forward scan that catches
-duplicate result IDs, which are undefined behaviour per SPIR-V spec §2.4 and
-typically crash Vulkan drivers without a diagnostic. The scan uses an
-`unordered_set<uint32_t>` seeded from `id_bound` (header word 3). Two helper
-predicates classify opcodes: `spirv_opcode_has_result` (value-producing
-instructions with a type-id + result-id pair) and `spirv_opcode_is_type`
-(OpTypeXxx instructions with result-id only). Both are `constexpr` and cover
-the opcode set emitted by `emit_spirv_binary_elementwise`.
+`spirv_module::validate()` now performs an O (n) forward scan that catches duplicate result IDs, which are undefined
+behaviour per SPIR-V spec §2.4 and typically crash Vulkan drivers without a diagnostic. The scan uses an
+`unordered_set<uint32_t>` seeded from `id_bound` (header word 3). Two helper predicates classify opcodes:
+`spirv_opcode_has_result` (value-producing instructions with a type-id + result-id pair) and `spirv_opcode_is_type`
+(OpTypeXxx instructions with result-id only). Both are `constexpr` and cover the opcode set emitted by
+`emit_spirv_binary_elementwise`.
 
 ---
 
@@ -3417,8 +3326,8 @@ and the interpreter/AsmJIT backends for evaluation. See `include/sutra/sutra.hpp
 **Opt-in header, not pulled by `lithe.hpp`.** Namespace `lithe::tune`.  
 Depends on: `lithe_profiles.hpp`, `utils/profiler.hpp` (Mann-Whitney comparison).
 
-`auto_tuner<ProfileVariants...>` benchmarks each profile variant on a user expression and picks the
-fastest one, with statistical significance testing via `profiler::compare`.
+`auto_tuner<ProfileVariants...>` benchmarks each profile variant on a user expression and picks the fastest one, with
+statistical significance testing via `profiler::compare`.
 
 ```cpp
 #include "lithe/lithe_autotune.hpp"
@@ -3453,8 +3362,8 @@ Core emits only a neutral `graph_document`. Providers (DOT, Mermaid, JSON) are s
 
 ### `graph_document`
 
-Backed by `LiteGraph<node_attrs, edge_attrs, Directed>`. All IR adapters produce a `graph_document`;
-no adapter writes DOT or JSON directly.
+Backed by `LiteGraph<node_attrs, edge_attrs, Directed>`. All IR adapters produce a `graph_document`; no adapter writes
+DOT or JSON directly.
 
 ```cpp
 struct node_attrs { std::size_t doc_id; std::string label, category; std::size_t use_count; };
@@ -3530,15 +3439,13 @@ Each mismatch carries a `diag::diagnostic` with `severity::error` and `stage::ba
 - **Constexpr-friendly.** `make_node`, `evaluate`, `tree::*` functions are all `constexpr`.
 - **Pay-for-use.** `dag_node` uses `std::any` — incurs heap allocation. Only construct DAGs when CSE metadata is needed.
 - **`tree_backend`** in `lithe_lowering.hpp` is under development; prefer DAG or MIR representations in production.
-- **Tree CSE/DCE:** standard tree presets do not schedule placeholder or analysis-only passes. Use the portable
-  HL-MIR `pure_cse_pass` and `dce_pass` for executable optimization, or `graph::build_dag()` for tree-level sharing
-  metadata.
+- **Tree CSE/DCE:** standard tree presets do not schedule placeholder or analysis-only passes. Use the portable HL-MIR
+  `pure_cse_pass` and `dce_pass` for executable optimization, or `graph::build_dag()` for tree-level sharing metadata.
 - **MIR integer semantics:** All integer ops (`add`, `sub`, `mul`, `div`, `mod`, `shl`, `shr`) are wrapping
   two's-complement. Specifically: add/sub/mul wrap modulo 2^64; `x/0` and `x%0` return 0; `INT64_MIN / -1`
   returns `INT64_MIN`; `INT64_MIN % -1` returns 0; `shr` is **arithmetic** (sign-preserving, not zero-fill)
-  and shift counts are masked `& 63`. All backends — interpreter, constant folding, AArch64 JIT (`asr`), and
-  x86-64 JIT (`sar`, with an `INT64_MIN/-1` guard around `idiv`) — honor this single contract so interpreter
-  and JIT results agree.
+  and shift counts are masked `& 63`. All backends — interpreter, constant folding, AArch64 JIT (`asr`), and x86-64 JIT
+  (`sar`, with an `INT64_MIN/-1` guard around `idiv`) — honor this single contract so interpreter and JIT results agree.
 
 ---
 
@@ -3842,7 +3749,7 @@ thaw_module(const portable_module&, const thaw_options& = {});
 **Thaw five-pass rebuild** (two passes required for forward SSA refs):
 
 1. **Allocate**: `alloc_node<T>()` per wire block/region/op; build wire-id→live-pointer maps via `SparseSet` (
-   `containers/associative/SparseSet.hpp`; dense `uint32_t` keys, O(1)).
+   `containers/associative/SparseSet.hpp`; dense `uint32_t` keys, O (1)).
 2. **Wire operands/results**: allocate spans in fresh arena; fill from wire ids.
 3. **Attrs**: rebuild `hl_op_attr` from `for_attr`/`memref_desc`; `element_kind` string → `abstract_value_kind`.
 4. **Link intrusive lists**: push ops into blocks, blocks into regions, regions under parent ops.
@@ -3885,8 +3792,8 @@ litegraph_cfg_result to_litegraph(const adapters::lithe_hl_mir_ir&);
 // → { litegraph::Graph<uint32_t,...,Directed> graph; std::vector<NodeId> node_ids; }
 ```
 
-Nodes = `hl_wire_block` ids; edges = terminator branch targets. Used by verifier (dominance + SCC), impl-2 (
-reachability/liveness). Single adapter; no duplication.
+Nodes = `hl_wire_block` ids; edges = terminator branch targets. Used by verifier (dominance + SCC), impl-2
+(reachability/liveness). Single adapter; no duplication.
 
 #### `digest.hpp` — canonical encode + semantic digest
 
@@ -3912,8 +3819,8 @@ little-endian widths; no padding entropy. Built on generic `containers/canonical
 `semantic_digest` stores result in `portable_manifest::semantic_digest`. Two differently-constructed encodings of the
 same logical module produce equal digest; any op mutation changes it.
 
-**Cross-links:** portable optimization consumes this boundary (impl-2); durable artifacts key on `semantic_digest` (
-impl-3); execution uses `thaw` (impl-4).
+**Cross-links:** portable optimization consumes this boundary (impl-2); durable artifacts key on `semantic_digest`
+(impl-3); execution uses `thaw` (impl-4).
 
 ---
 
@@ -4099,7 +4006,7 @@ with zero core changes.
 | Layer          | Header                                | Namespace       | Role                                                                                                       |
 |----------------|---------------------------------------|-----------------|------------------------------------------------------------------------------------------------------------|
 | Generic engine | `include/containers/graph/egraph.hpp` | `egraph`        | Standalone container: union-find, hashcons, congruence closure, saturation, extraction, rule/cost concepts |
-| Lithe adapter  | `include/lithe/lithe_egraph.hpp`       | `lithe::egraph` | `intern` bridge, Lithe op-id map, rule/cost bindings, `egraph_optimize` pass, NADI telemetry               |
+| Lithe adapter  | `include/lithe/lithe_egraph.hpp`      | `lithe::egraph` | `intern` bridge, Lithe op-id map, rule/cost bindings, `egraph_optimize` pass, NADI telemetry               |
 
 ### Generic Engine (`egraph::`)
 
@@ -4279,8 +4186,8 @@ After `identity_zero` rules fire: `mul(x,1) ≡ x` and `add(x,0) ≡ x` are merg
 **Header:** `lithe/lithe_pattern.hpp` — not pulled by `lithe.hpp`.  
 **Namespace:** `lithe::pattern`
 
-Compile-time structural matching over Lithe AST nodes. `pattern_var<ID>` captures a
-sub-expression; `literal_pattern<V>` matches a specific constant value.
+Compile-time structural matching over Lithe AST nodes. `pattern_var<ID>` captures a sub-expression; `literal_pattern<V>`
+matches a specific constant value.
 
 ```cpp
 #include "lithe/lithe_pattern.hpp"
@@ -4314,8 +4221,8 @@ auto [result, changed] = rewrite_pass(expr, rule_set);   // one pass
 auto optimized         = rewrite_fixpoint(expr, rule_set); // until stable
 ```
 
-`rewrite_fixpoint` wraps `rewrite_pass` in a fixed-point loop (default 16
-iterations). `rewrite_pass_adapter` satisfies `pass_type_traits` with
+`rewrite_fixpoint` wraps `rewrite_pass` in a fixed-point loop (default 16 iterations). `rewrite_pass_adapter` satisfies
+`pass_type_traits` with
 `pass_category::optimization` so it slots directly into a `static_pipeline`.
 
 ---
@@ -4356,8 +4263,8 @@ reg.register_model("my.cost", [](const void* n, std::span<const float> cs) {
 auto fn_opt = reg.find("my.cost"); // std::optional<std::reference_wrapper<const cost_fn>>
 ```
 
-Domain libraries (e.g. Sutra) register their models via `register_model` on startup. The
-registry is separate from the `backend_registry` and uses `algorithm_box` (SBO, 64-byte inline).
+Domain libraries (e.g. Sutra) register their models via `register_model` on startup. The registry is separate from the
+`backend_registry` and uses `algorithm_box` (SBO, 64-byte inline).
 
 ---
 
@@ -4377,8 +4284,8 @@ auto [result, expl] = lithe::explain::explain_optimization(expr, pass1, pass2);
 std::puts(expl.format(/*markdown=*/true).c_str());
 ```
 
-`rule_reason_registry` maps rule names to human-readable reasons; populated at startup and
-queried by `explain_optimization` when building each `rule_application_entry`.
+`rule_reason_registry` maps rule names to human-readable reasons; populated at startup and queried by
+`explain_optimization` when building each `rule_application_entry`.
 
 ---
 
@@ -4401,8 +4308,8 @@ lithe::feedback::feedback_aware_selector selector{store};
 ```
 
 Runtime data may be sourced from `pravaha_profiler.hpp` (task latency) or any
-`hardware_signature`-aware profiling shim. The backing store is a sharded Kosha LRU cache
-keyed on `(structural_hash, hardware_signature)`.
+`hardware_signature`-aware profiling shim. The backing store is a sharded Kosha LRU cache keyed on
+`(structural_hash, hardware_signature)`.
 
 ### Cross-framework wiring (`telemetry/execution_feedback.hpp`)
 
@@ -4414,15 +4321,15 @@ Pravaha task timings  ->  execution_feedback bridge  ->  Lithe feedback_store  -
 
 **Header:** `telemetry/execution_feedback.hpp` **Namespace:** `turbo_twig::feedback`
 
-It includes both `pravaha/pravaha_profiler.hpp` and `lithe/lithe_feedback.hpp`; neither
-framework includes the bridge, so there is no dependency cycle. Zero cost when unused.
+It includes both `pravaha/pravaha_profiler.hpp` and `lithe/lithe_feedback.hpp`; neither framework includes the bridge,
+so there is no dependency cycle. Zero cost when unused.
 
 - `feedback_context{ expr_hash, backend_id, hw }` — the attribution a raw task timing lacks.
 - `convert(task_profile_sample, feedback_context) -> performance_sample` — `execution_ns → latency_ms`;
   throughput/memory/power stay `0.0` (Pravaha does not measure them).
 - `feedback_recorder{ctx, &store}` — a `pravaha::profile::profile_sink`. Pass it to
-  `with_profiling(policy, recorder)`; each drained sample is recorded into the store, logged
-  for persistence, and (when a `telemetry_session` is active) emitted on the `feedback` channel.
+  `with_profiling(policy, recorder)`; each drained sample is recorded into the store, logged for persistence, and (when
+  a `telemetry_session` is active) emitted on the `feedback` channel.
 
 ```cpp
 #include "telemetry/execution_feedback.hpp"
@@ -4436,9 +4343,9 @@ auto policy = pravaha::profile::with_profiling(fifo_scheduler_policy{}, rec);
 rec.save("feedback.log");                 // bridge-owned persistence
 ```
 
-**Persistence** is bridge-owned: `feedback_recorder::save/load` serialize the recorder's own
-sample log and replay it into the store. `feedback_store::save/load` remain stubs by design
-(`ShardedCache` exposes no iteration; the bridge log is the persistence path).
+**Persistence** is bridge-owned: `feedback_recorder::save/load` serialize the recorder's own sample log and replay it
+into the store. `feedback_store::save/load` remain stubs by design (`ShardedCache` exposes no iteration; the bridge log
+is the persistence path).
 
 ---
 
@@ -4519,8 +4426,8 @@ concept cost_estimator =
 | `scalar_cost_estimator<CM>` | Wraps any `cost_model CM`; maps scalar → `latency` axis only                 |
 | `balanced_cost_estimator`   | Heuristic: all four axes; context-sensitive (GPU backends widen div penalty) |
 
-`balanced_cost_estimator` is the default for `cost_based_backend_selector` scoring when a richer signal than
-a single scalar is available.
+`balanced_cost_estimator` is the default for `cost_based_backend_selector` scoring when a richer signal than a single
+scalar is available.
 
 ### Extending with a learned estimator
 
@@ -4537,8 +4444,8 @@ struct learned_cost_estimator {
 static_assert(lithe::cost::cost_estimator<learned_cost_estimator, lithe_enode_t>);
 ```
 
-Because `cost_estimator` is a structural concept — no base class, no registration — swapping heuristic
-for learned is a one-line template argument change with zero call-site edits.
+Because `cost_estimator` is a structural concept — no base class, no registration — swapping heuristic for learned is a
+one-line template argument change with zero call-site edits.
 
 ---
 
@@ -4549,8 +4456,8 @@ for learned is a one-line template argument change with zero call-site edits.
 
 ### Expression-level: `verify_equivalent`
 
-Checks that two expressions produce the same numeric output over a set of test vectors.
-Designed for validating rewrite rules, e-graph rewrites, tensor rewrites, and domain rule packs.
+Checks that two expressions produce the same numeric output over a set of test vectors. Designed for validating rewrite
+rules, e-graph rewrites, tensor rewrites, and domain rule packs.
 
 ```cpp
 #include "lithe/lithe_diff_verify.hpp"
@@ -4683,7 +4590,7 @@ auto fv = rfe.current();   // 8-element feature_vector
 **Namespace:** `lithe::features`
 
 Provides persistent feature snapshot storage so auto-tuning, adaptive optimization, telemetry, and ML cost models can
-retrieve previously computed features in O(1) without re-running extractors.
+retrieve previously computed features in O (1) without re-running extractors.
 
 ### Architecture
 
@@ -4881,8 +4788,8 @@ Lithe's decision systems are structurally open to learned implementations withou
 
 ### Principle
 
-All decision systems MUST allow heuristic and learned implementations via the same concept interface.
-This is an **architectural invariant**, not a future aspiration.
+All decision systems MUST allow heuristic and learned implementations via the same concept interface. This is an
+**architectural invariant**, not a future aspiration.
 
 ### Current extensibility points
 
@@ -4902,8 +4809,8 @@ This is an **architectural invariant**, not a future aspiration.
 - `runtime_feature_extractor` → accumulated execution statistics (Welford mean/variance)
 - `combined_feature_extractor<A,B>` → concatenate any two extractors
 
-The `property_system` (Vākya `property.hpp`) is already structurally ideal for ML metadata sidecar.
-Future property keys for ML-enriched nodes:
+The `property_system` (Vākya `property.hpp`) is already structurally ideal for ML metadata sidecar. Future property keys
+for ML-enriched nodes:
 
 | Property key           | Type                   | Description                       |
 |------------------------|------------------------|-----------------------------------|
@@ -5024,8 +4931,8 @@ candidates → features → costs → rank → select → explain → feedback
 ```
 
 Prior to this layer, backend selection, pass-pipeline selection, and schedule selection each re-implemented
-candidate-generate → score → pick. The intelligence layer provides shared vocabulary so all three participate in
-the same ranked pipeline and produce comparable cost_vectors.
+candidate-generate → score → pick. The intelligence layer provides shared vocabulary so all three participate in the
+same ranked pipeline and produce comparable cost_vectors.
 
 ### Architecture Overview
 
@@ -5105,8 +5012,8 @@ Free functions: `propagate_forward(src, dst)` — src wins on conflict; `merge(a
 
 **Header**: `include/lithe/lithe_adaptive.hpp`
 
-`adaptive_cost_model<Base>` wraps any `cost_estimator<Base,Node>` and blends its static estimate with
-observed `performance_profile` data from `feedback_store`.
+`adaptive_cost_model<Base>` wraps any `cost_estimator<Base,Node>` and blends its static estimate with observed
+`performance_profile` data from `feedback_store`.
 
 ```
 effective_blend = blend * min(1.0, sample_count / confidence_threshold)
@@ -5121,8 +5028,8 @@ result = (1 - effective_blend) * base_estimate + effective_blend * observed
 
 **Header**: `include/lithe/lithe_schedule_bridge.hpp`
 
-`choose_schedule(mir_features, cost_context) → schedule_policy_id` selects a pravaha scheduler policy
-from `mir_features` without including any pravaha headers.
+`choose_schedule(mir_features, cost_context) → schedule_policy_id` selects a pravaha scheduler policy from
+`mir_features` without including any pravaha headers.
 
 | `schedule_policy_id` | Condition                                     |
 |----------------------|-----------------------------------------------|
@@ -5137,8 +5044,8 @@ Caller maps the id to the concrete pravaha policy — no circular dependency.
 
 #### Strengthened Scheduling Infrastructure (Gap 3)
 
-Three new types bring scheduling decisions into the same feature/cost/decision vocabulary used by
-compilation decisions, so Pravaha and Lithe share infrastructure without a circular dependency.
+Three new types bring scheduling decisions into the same feature/cost/decision vocabulary used by compilation decisions,
+so Pravaha and Lithe share infrastructure without a circular dependency.
 
 **`scheduler_features`** — 6-dimensional feature vector extracted from `mir_features`:
 
@@ -5157,16 +5064,16 @@ auto fv = sf.to_feature_vector();          // → feature_vector for ML pipeline
 ```
 
 **`scheduler_cost_model`** — assigns a `cost_vector` to each `schedule_policy_id` candidate given a
-`scheduler_features` context. Heuristics mirror `choose_schedule` but operate on the normalised
-float fields rather than the raw integer `mir_features`:
+`scheduler_features` context. Heuristics mirror `choose_schedule` but operate on the normalised float fields rather than
+the raw integer `mir_features`:
 
 ```cpp
 lithe::intelligence::scheduler_cost_model cm;
 auto cv = cm.estimate(schedule_policy_id::critical_path, sf, ctx);
 ```
 
-**`scheduler_strategy<S>` concept** — mirrors `selector_strategy` so compilation decisions (backend
-selector) and execution decisions (scheduler) share the same concept vocabulary:
+**`scheduler_strategy<S>` concept** — mirrors `selector_strategy` so compilation decisions (backend selector) and
+execution decisions (scheduler) share the same concept vocabulary:
 
 ```cpp
 template <class S>
@@ -5178,8 +5085,8 @@ concept scheduler_strategy =
     };
 ```
 
-**`heuristic_scheduler_strategy`** — default implementation; wraps `choose_schedule()` behind the
-concept interface. Stateless; always succeeds; `static_assert`-verified.
+**`heuristic_scheduler_strategy`** — default implementation; wraps `choose_schedule()` behind the concept interface.
+Stateless; always succeeds; `static_assert`-verified.
 
 ```cpp
 lithe::intelligence::heuristic_scheduler_strategy strat;
@@ -5253,9 +5160,9 @@ Adaptive Feedback  (lithe_feedback.hpp ← execution_feedback.hpp bridge ← Pra
 Adaptive Cost Model  (lithe_adaptive.hpp — blend static estimate with observed samples)
 ```
 
-A new contributor can trace any production path by following this chain: expression construction →
-Vākya structural substrate → Lithe semantic + optimization + cost layers → backend selection + lowering
-→ execution + observability → closed-loop adaptive feedback.
+A new contributor can trace any production path by following this chain: expression construction → Vākya structural
+substrate → Lithe semantic + optimization + cost layers → backend selection + lowering → execution + observability →
+closed-loop adaptive feedback.
 
 ---
 
@@ -5301,8 +5208,8 @@ These two sub-layers are **complementary, not overlapping** — do not merge the
 | Analysis & Planning    | `lithe::exec`      | `lithe_exec/`      | *What mode?* (legality, profitability, plan) | `execution_kind`, `execution_plan`, `auto_execution_pass` |
 | Backend Infrastructure | `lithe::execution` | `lithe_execution/` | *How to run?* (compile, install, registry)   | `execution_mode`, `backend_registry`, `entry_lease`       |
 
-Conversion between `execution_kind` and `execution_mode`: `lithe_exec/exec_bridge.hpp`.
-When wiring `auto_execution_pass` output to backend selection, use `compile_requirements::for_exec_plan()`
+Conversion between `execution_kind` and `execution_mode`: `lithe_exec/exec_bridge.hpp`. When wiring
+`auto_execution_pass` output to backend selection, use `compile_requirements::for_exec_plan()`
 (sets `artifact.accepted_input = ir_kind::hl_mir` automatically).
 
 ### Reuse Map
@@ -5491,9 +5398,8 @@ for (const auto& plan : plans) {
 
 `compute_key_digest(key)` → stable 32-byte SHA-256 used as primary catalog id and content address.
 
-**Semantic digest** (impl-1 `portable::semantic_digest`) = program identity.
-**Payload digest** (in the envelope) = artifact integrity.
-**Executable key** adds target facts — the portable artifact's key has none.
+**Semantic digest** (impl-1 `portable::semantic_digest`) = program identity. **Payload digest** (in the envelope) =
+artifact integrity. **Executable key** adds target facts — the portable artifact's key has none.
 
 ### Artifact Envelope (arch §8)
 
@@ -5515,23 +5421,21 @@ auto record = st::decode_artifact(*bytes, policy);  // enforces ordering
 
 ### Formats vs Stores (arch §8)
 
-| Layer                   | Format                                   | Store                                             |
-|-------------------------|------------------------------------------|---------------------------------------------------|
-| IR payload              | Lithe Binary IR (impl-1 binary_provider) | —                                                 |
+| Layer                   | Format                                   | Store                                        |
+|-------------------------|------------------------------------------|----------------------------------------------|
+| IR payload              | Lithe Binary IR (impl-1 binary_provider) | —                                            |
 | Catalog metadata        | Versioned `LCAT` v2 binary record        | Petika (`petika_catalog`) / `memory_catalog` |
-| Large blobs             | content-addressed bytes                  | `filesystem_blob_store` (sharded directory)       |
-| Resident decoded IR     | in-memory shared_ptr                     | Kosha `ShardedLRUCache`                           |
-| Resident installed code | in-memory shared_ptr                     | Kosha `ShardedLRUCache`                           |
+| Large blobs             | content-addressed bytes                  | `filesystem_blob_store` (sharded directory)  |
+| Resident decoded IR     | in-memory shared_ptr                     | Kosha `ShardedLRUCache`                      |
+| Resident installed code | in-memory shared_ptr                     | Kosha `ShardedLRUCache`                      |
 
-**Storage choice**: Petika is the Bedrock catalog provider. Its typed
-transaction boundary supplies key-to-record lookup and per-key leases without
-making Lithe own a database implementation.
+**Storage choice**: Petika is the Bedrock catalog provider. Its typed transaction boundary supplies key-to-record lookup
+and per-key leases without making Lithe own a database implementation.
 
-`LCAT` v2 persists the complete catalog contract: blob address and size,
-artifact kind, provenance (pipeline/backend versions, upgrades, producer), full
-compatibility manifest (schema, ABI, capabilities, target, external symbols,
-security policy), timestamps, and signature. Decode and Petika failures are
-reported as typed catalog errors rather than converted into cache misses.
+`LCAT` v2 persists the complete catalog contract: blob address and size, artifact kind, provenance (pipeline/backend
+versions, upgrades, producer), full compatibility manifest (schema, ABI, capabilities, target, external symbols,
+security policy), timestamps, and signature. Decode and Petika failures are reported as typed catalog errors rather than
+converted into cache misses.
 
 ### Catalog Key Layout (petika_catalog)
 
@@ -5541,11 +5445,10 @@ reported as typed catalog errors rather than converted into cache misses.
 "x:" + accessed_ns_BE[8] + digest[32] → ""         (LRU eviction index, ordered)
 ```
 
-`publish()` validates the persisted owner token and wall-clock expiry before a
-single Petika transaction publishes the artifact and removes the lease.
-`abandon()` removes a matching lease after compile, blob-store, or publish
-failure, so retry does not wait for the TTL. `petika_catalog` is a local-process
-provider; cluster-wide compilation coordination remains outside Lithe.
+`publish()` validates the persisted owner token and wall-clock expiry before a single Petika transaction publishes the
+artifact and removes the lease.
+`abandon()` removes a matching lease after compile, blob-store, or publish failure, so retry does not wait for the TTL.
+`petika_catalog` is a local-process provider; cluster-wide compilation coordination remains outside Lithe.
 
 ### Atomic Publish Protocol (`get_or_compile`) — arch §7, §12
 
@@ -5562,9 +5465,8 @@ lookup(key) → miss:
     hit → return; still-miss → retry
 ```
 
-Lease has a TTL (`k_lease_ttl_ns = 30 s`) so a crashed compiler doesn't wedge the key.
-Persisted expiries use the system clock, so they remain meaningful after a
-process restart. Corrupt metadata or a missing/corrupt blob is evicted and
+Lease has a TTL (`k_lease_ttl_ns = 30 s`) so a crashed compiler doesn't wedge the key. Persisted expiries use the system
+clock, so they remain meaningful after a process restart. Corrupt metadata or a missing/corrupt blob is evicted and
 rebuilt once; backend I/O errors remain visible to the caller.
 
 ### Compatibility Predicate (arch §9)
@@ -5597,8 +5499,8 @@ struct provenance {
 };
 ```
 
-`upgrade_step` captures the upgrader id + from/to schema version. Multi-hop upgrade routing uses `conversion_graph` (
-Dijkstra) over schema versions for the least-cost upgrade path.
+`upgrade_step` captures the upgrader id + from/to schema version. Multi-hop upgrade routing uses `conversion_graph`
+(Dijkstra) over schema versions for the least-cost upgrade path.
 
 ### Retirement Safety (arch §7, §12)
 
@@ -5863,7 +5765,7 @@ concept ir_view = requires(const V& v, entity_ref e) {
 };
 ```
 
-Three concrete zero-erasure views (each a non-owning `const T*` wrapper, O(1) construction):
+Three concrete zero-erasure views (each a non-owning `const T*` wrapper, O (1) construction):
 
 | Type                | Subject                        | `family()`     | `stage_of()`   |
 |---------------------|--------------------------------|----------------|----------------|
@@ -6063,12 +5965,12 @@ concept profile_source =
 All decision entry points (impl-2 optimizer, impl-4 planner, cost model) take `const ProfileSrc& = no_profile{}` as a
 defaulted template param. Swapping the source flips all three consistently.
 
-| Source               | `available` | Description                                                                                       |
-|----------------------|-------------|---------------------------------------------------------------------------------------------------|
-| `no_profile`         | `false`     | Zero-cost identity (empty struct); output byte-identical to pre-impl-7                            |
-| `recorded_profile`   | `true`      | Built from `stage_metric` data; bias = `measured/estimated` ratio per stage                       |
+| Source               | `available` | Description                                                                                        |
+|----------------------|-------------|----------------------------------------------------------------------------------------------------|
+| `no_profile`         | `false`     | Zero-cost identity (empty struct); output byte-identical to pre-impl-7                             |
+| `recorded_profile`   | `true`      | Built from `stage_metric` data; bias = `measured/estimated` ratio per stage                        |
 | `learned_profile`    | `true`      | ML adapter (`__has_include("lithe/lithe_ml_interfaces.hpp")`); set model via `set_model(infer_fn)` |
-| `any_profile_source` | `true`      | Type-erased (fn-pointer trio + `shared_ptr<void>`); cold config boundary only                     |
+| `any_profile_source` | `true`      | Type-erased (fn-pointer trio + `shared_ptr<void>`); cold config boundary only                      |
 
 `profile_hint` carries `hot`, `cold`, `suggested_unroll`, `prefer_vectorize`, `prefer_inline`, `avoid_inline`.
 
