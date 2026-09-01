@@ -1851,6 +1851,11 @@ add/multiply execution path for admitted plans. They require equal input/output
 extents and honor the proven tail mode. Rejected plans, extent mismatch, or an
 invalid whole-vector tail invoke a statically-bound scalar fallback.
 
+`simd_kernels` also provides typed `reduce_sum` kernels for `float`, `double`,
+and `int32_t`. `lower_vector_reduction_plan_for_simd` and
+`execute_simd_reduction` expose planned horizontal reduction with the same
+explicit scalar-fallback behavior used by binary elementwise paths.
+
 The native Metal path consumes the same `vector_plan` through
 `bind_vector_plan_for_metal`. It first rejects plans that are not proven,
 materialized f32 elementwise work, then checks native Metal availability. Its

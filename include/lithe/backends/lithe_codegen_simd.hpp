@@ -221,6 +221,20 @@ namespace lithe::codegen::backends {
             for (; i < a.size(); ++i) total += a[i];
             return total;
         }
+
+        // Horizontal sum (int32_t).
+        [[nodiscard]] static std::int32_t reduce_sum(std::span<const std::int32_t> a) noexcept {
+            const hn::ScalableTag<std::int32_t> d;
+            const std::size_t lanes = hn::Lanes(d);
+            auto acc = hn::Zero(d);
+            std::size_t i = 0;
+            for (; i + lanes <= a.size(); i += lanes) {
+                acc = hn::Add(acc, hn::LoadU(d, a.data() + i));
+            }
+            std::int32_t total = hn::ReduceSum(d, acc);
+            for (; i < a.size(); ++i) total += a[i];
+            return total;
+        }
     };
 
     enum class simd_plan_disposition : std::uint8_t {
@@ -282,6 +296,8 @@ namespace lithe::codegen::backends {
         scalar_fallback,
     };
 
+    enum class simd_reduction_operation : std::uint8_t { sum };
+
     struct simd_binary_lowering {
         simd_plan_binding binding{};
         simd_binary_operation operation = simd_binary_operation::add;
@@ -289,9 +305,39 @@ namespace lithe::codegen::backends {
         [[nodiscard]] constexpr bool accepted() const noexcept { return binding.accepted(); }
     };
 
+    struct simd_reduction_lowering {
+        simd_plan_binding binding{};
+        simd_reduction_operation operation = simd_reduction_operation::sum;
+
+        [[nodiscard]] constexpr bool accepted() const noexcept { return binding.accepted(); }
+    };
+
     [[nodiscard]] inline simd_binary_lowering lower_vector_plan_for_simd(
         const hl::vector_plan& plan, const simd_binary_operation operation) noexcept {
         return {.binding = bind_vector_plan(plan), .operation = operation};
+    }
+
+    [[nodiscard]] inline simd_reduction_lowering lower_vector_reduction_plan_for_simd(
+        const hl::vector_plan& plan, const simd_reduction_operation operation = simd_reduction_operation::sum) noexcept {
+        simd_plan_binding binding;
+        binding.planned_lanes = plan.lanes;
+        binding.tail = plan.tail;
+        const bool compatible_tail = plan.tail == hl::vector_tail_strategy::none
+            || plan.tail == hl::vector_tail_strategy::scalar_epilogue;
+        if (plan.element_bits == 32) {
+            binding.native_lanes = static_cast<std::uint32_t>(simd_kernels::float_lanes());
+        } else if (plan.element_bits == 64) {
+            binding.native_lanes = static_cast<std::uint32_t>(simd_kernels::double_lanes());
+        }
+        if (plan.legality == hl::vector_plan_legality::proven
+            && plan.schedule_materialized
+            && (plan.element_bits == 32 || plan.element_bits == 64)
+            && plan.reduction == hl::vector_reduction_shape::horizontal
+            && compatible_tail
+            && binding.native_lanes != 0) {
+            binding.disposition = simd_plan_disposition::accepted;
+        }
+        return {.binding = binding, .operation = operation};
     }
 
     template <class T, class ScalarFallback>
@@ -317,6 +363,28 @@ namespace lithe::codegen::backends {
         case simd_binary_operation::multiply: simd_kernels::mul(lhs, rhs, output); break;
         }
         return simd_execution_path::vectorized;
+    }
+
+    template <class T, class ScalarFallback>
+        requires std::invocable<ScalarFallback&, std::span<const T>>
+    [[nodiscard]] inline std::pair<T, simd_execution_path> execute_simd_reduction(
+        const simd_reduction_lowering& lowering,
+        const std::span<const T> input,
+        ScalarFallback&& scalar_fallback) noexcept(noexcept(std::invoke(scalar_fallback, input))) {
+        if (!lowering.accepted()) {
+            return {std::invoke(std::forward<ScalarFallback>(scalar_fallback), input),
+                    simd_execution_path::scalar_fallback};
+        }
+        if constexpr (std::same_as<T, float>) {
+            return {simd_kernels::reduce_sum(input), simd_execution_path::vectorized};
+        } else if constexpr (std::same_as<T, double>) {
+            return {simd_kernels::reduce_sum(input), simd_execution_path::vectorized};
+        } else if constexpr (std::same_as<T, std::int32_t>) {
+            return {simd_kernels::reduce_sum(input), simd_execution_path::vectorized};
+        } else {
+            return {std::invoke(std::forward<ScalarFallback>(scalar_fallback), input),
+                    simd_execution_path::scalar_fallback};
+        }
     }
 
     // float overload with fixed-extent span conversion so legacy call sites
